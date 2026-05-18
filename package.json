@@ -1,0 +1,16 @@
+{
+  "name": "kame-inventario-pwa",
+  "version": "1.0.0",
+  "description": "PWA toma de inventario Flor del Lago",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev":   "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

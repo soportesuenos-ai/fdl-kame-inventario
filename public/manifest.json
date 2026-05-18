@@ -1,0 +1,14 @@
+{
+  "name": "KAME Inventario",
+  "short_name": "Inventario",
+  "description": "Toma de inventario Flor del Lago",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1923",
+  "theme_color": "#e8a020",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

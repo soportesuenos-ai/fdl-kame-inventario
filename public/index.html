@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#e8a020">
+  <title>KAME Inventario</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<!-- ══ SPLASH ═══════════════════════════════════════════════════════════ -->
+<div id="splash" class="screen active">
+  <div class="splash-bg"></div>
+  <div class="splash-content">
+    <div class="logo-mark">
+      <img src="/logo-sello.jpg" alt="Flor del Lago" class="logo-sello">
+    </div>
+    <h1 class="splash-title">INVENTARIO</h1>
+    <p class="splash-sub">FDL Maderas</p>
+    <div class="splash-loader">
+      <div class="loader-bar"></div>
+    </div>
+    <p class="splash-status" id="splashStatus">Iniciando...</p>
+  </div>
+</div>
+
+<!-- ══ LOGIN ════════════════════════════════════════════════════════════ -->
+<div id="login" class="screen">
+  <div class="screen-header">
+    <img src="/logo-fdl.png" alt="FDL Maderas" class="logo-header">
+    <h2>Inventario</h2>
+  </div>
+  <div class="form-body">
+    <div class="field-group">
+      <label>Usuario</label>
+      <input type="text" id="loginUser" placeholder="tu.nombre" autocomplete="username">
+    </div>
+    <div class="field-group">
+      <label>PIN</label>
+      <input type="password" id="loginPin" placeholder="••••" maxlength="6" inputmode="numeric" autocomplete="current-password">
+    </div>
+    <p class="login-error" id="loginError"></p>
+    <button class="btn-primary" onclick="App.login()">Ingresar</button>
+  </div>
+  <p class="offline-badge" id="offlineBadge">📵 Modo sin conexión</p>
+</div>
+
+<!-- ══ HOME ══════════════════════════════════════════════════════════════ -->
+<div id="home" class="screen">
+  <div class="top-bar">
+    <div class="top-bar-left">
+      <img src="/logo-sello.jpg" alt="FDL" class="logo-topbar">
+      <span class="top-user" id="topUser">—</span>
+    </div>
+    <div class="top-bar-right">
+      <span class="conn-dot" id="connDot"></span>
+      <button class="btn-icon" onclick="App.logout()">⏻</button>
+    </div>
+  </div>
+
+  <div class="home-body">
+    <h1 class="home-title">Toma de<br>Inventario</h1>
+
+    <div class="session-card" id="activeSessionCard" style="display:none">
+      <div class="session-info">
+        <span class="session-label">Sesión activa</span>
+        <span class="session-name" id="activeSessionName">—</span>
+        <span class="session-stats" id="activeSessionStats">0 artículos contados</span>
+      </div>
+      <button class="btn-continue" onclick="App.goTo('count')">Continuar →</button>
+    </div>
+
+    <div class="home-actions">
+      <button class="action-card" onclick="App.startSession()">
+        <div class="action-icon">📦</div>
+        <div class="action-text">
+          <strong>Nueva toma</strong>
+          <span>Iniciar conteo de bodega</span>
+        </div>
+        <div class="action-arrow">›</div>
+      </button>
+      <button class="action-card" onclick="App.goTo('review')" id="btnReview" disabled>
+        <div class="action-icon">📋</div>
+        <div class="action-text">
+          <strong>Revisar diferencias</strong>
+          <span>Comparar con KAME</span>
+        </div>
+        <div class="action-arrow">›</div>
+      </button>
+      <button class="action-card" onclick="App.goTo('sync')" id="btnSync" disabled>
+        <div class="action-icon">☁️</div>
+        <div class="action-text">
+          <strong>Subir a KAME</strong>
+          <span>Sincronizar inventario</span>
+        </div>
+        <div class="action-arrow">›</div>
+      </button>
+    </div>
+
+    <div class="pending-banner" id="pendingBanner" style="display:none">
+      <span>🔄 <strong id="pendingCount">0</strong> conteos pendientes de sincronizar</span>
+    </div>
+  </div>
+</div>
+
+<!-- ══ NUEVA SESIÓN ══════════════════════════════════════════════════════ -->
+<div id="newSession" class="screen">
+  <div class="nav-bar">
+    <button class="btn-back" onclick="App.goTo('home')">‹ Volver</button>
+    <h3>Nueva Toma</h3>
+    <div></div>
+  </div>
+  <div class="form-body">
+    <div class="field-group">
+      <label>Bodega</label>
+      <select id="selectBodega">
+        <option value="">— Seleccionar —</option>
+        <option value="PATIO SECO">PATIO SECO</option>
+        <option value="PATIO VERDE">PATIO VERDE</option>
+        <option value="CANCHA DE TROZOS">CANCHA DE TROZOS</option>
+        <option value="SALA DE VENTAS VILLARRICA">SALA DE VENTAS VILLARRICA</option>
+        <option value="PATIO PELLET">PATIO PELLET</option>
+      </select>
+    </div>
+    <div class="field-group">
+      <label>Fecha</label>
+      <input type="date" id="sessionDate">
+    </div>
+    <div class="field-group">
+      <label>Responsable</label>
+      <input type="text" id="sessionResp" placeholder="Nombre del responsable">
+    </div>
+    <div class="field-group">
+      <label>Observaciones <span class="opt">(opcional)</span></label>
+      <textarea id="sessionObs" placeholder="Notas de la toma..." rows="2"></textarea>
+    </div>
+    <button class="btn-primary" onclick="App.createSession()">Iniciar Conteo →</button>
+  </div>
+</div>
+
+<!-- ══ CONTEO ════════════════════════════════════════════════════════════ -->
+<div id="count" class="screen">
+  <div class="nav-bar">
+    <button class="btn-back" onclick="App.goTo('home')">‹</button>
+    <div class="nav-center">
+      <h3 id="countBodega">—</h3>
+      <span class="nav-sub" id="countProgress">0 artículos</span>
+    </div>
+    <button class="btn-text-sm" onclick="App.goTo('review')">Revisar</button>
+  </div>
+
+  <!-- Búsqueda -->
+  <div class="search-bar">
+    <input type="search" id="searchInput" placeholder="Buscar para agregar artículo..." oninput="App.search(this.value)">
+    <button class="btn-qr" title="QR (próximamente)" onclick="App.qrNotReady()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z"/></svg>
+    </button>
+  </div>
+
+  <!-- Filtros colapsables -->
+  <div class="filter-toggle-bar">
+    <button class="btn-filter-toggle" id="btnFilterToggle" onclick="App.toggleFilters()">
+      🔽 Filtros <span id="filterActiveCount"></span>
+    </button>
+    <button class="btn-clear-filters" onclick="App.clearFilters()" id="btnClearFilters" style="display:none">✕ Limpiar</button>
+  </div>
+
+  <div class="filter-panel" id="filterPanel" style="display:none">
+    <div class="filter-row">
+      <span class="filter-label">Familia</span>
+      <div class="filter-chips-row" id="filterFamilia">
+        <button class="chip active" onclick="App.setFilter('familia', null, this)">Todas</button>
+        <button class="chip" onclick="App.setFilter('familia', 'OREGON', this)">Oregon</button>
+        <button class="chip" onclick="App.setFilter('familia', 'NATIVO', this)">Nativo</button>
+        <button class="chip" onclick="App.setFilter('familia', 'INSIGNE', this)">Insigne</button>
+        <button class="chip" onclick="App.setFilter('familia', 'ROBLE', this)">Roble</button>
+      </div>
+    </div>
+    <div class="filter-row">
+      <span class="filter-label">Tipo</span>
+      <div class="filter-chips-row" id="filterTipo">
+        <button class="chip active" onclick="App.setFilter('tipo', null, this)">Todos</button>
+        <button class="chip" onclick="App.setFilter('tipo', 'TABLA', this)">Tabla</button>
+        <button class="chip" onclick="App.setFilter('tipo', 'VIGA', this)">Viga</button>
+        <button class="chip" onclick="App.setFilter('tipo', 'PISO', this)">Piso</button>
+        <button class="chip" onclick="App.setFilter('tipo', 'CANTONERA', this)">Cantonera</button>
+        <button class="chip" onclick="App.setFilter('tipo', 'FORRO', this)">Forro</button>
+        <button class="chip" onclick="App.setFilter('tipo', 'TRASLAP0', this)">Traslap</button>
+        <button class="chip" onclick="App.setFilter('tipo', 'PILAR', this)">Pilar</button>
+        <button class="chip" onclick="App.setFilter('tipo', 'POSTE', this)">Poste</button>
+      </div>
+    </div>
+    <div class="filter-row">
+      <span class="filter-label">Calidad</span>
+      <div class="filter-chips-row" id="filterCalidad">
+        <button class="chip active" onclick="App.setFilter('calidad', null, this)">Todas</button>
+        <button class="chip" onclick="App.setFilter('calidad', '1ª', this)">1ª</button>
+        <button class="chip" onclick="App.setFilter('calidad', '2ª', this)">2ª</button>
+        <button class="chip" onclick="App.setFilter('calidad', '3ª', this)">3ª</button>
+      </div>
+    </div>
+    <div class="filter-row">
+      <span class="filter-label">Condición</span>
+      <div class="filter-chips-row" id="filterCondicion">
+        <button class="chip active" onclick="App.setFilter('condicion', null, this)">Todas</button>
+        <button class="chip" onclick="App.setFilter('condicion', 'SECO', this)">Seco</button>
+        <button class="chip" onclick="App.setFilter('condicion', 'VERDE', this)">Verde</button>
+      </div>
+    </div>
+    <div class="filter-row">
+      <span class="filter-label">Proceso</span>
+      <div class="filter-chips-row" id="filterProceso">
+        <button class="chip active" onclick="App.setFilter('proceso', null, this)">Todos</button>
+        <button class="chip" onclick="App.setFilter('proceso', 'CEPILLADO', this)">Cepillado</button>
+        <button class="chip" onclick="App.setFilter('proceso', 'RUSTICO', this)">Rústico</button>
+        <button class="chip" onclick="App.setFilter('proceso', 'TRADICIONAL', this)">Tradicional</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lista de artículos -->
+  <div class="article-list" id="articleList"></div>
+
+  <!-- FAB resumen -->
+  <button class="fab" onclick="App.goTo('review')" id="fabCount">
+    <span id="fabNumber">0</span>
+    <span class="fab-label">contados</span>
+  </button>
+</div>
+
+<!-- ══ REVISIÓN ══════════════════════════════════════════════════════════ -->
+<div id="review" class="screen">
+  <div class="nav-bar">
+    <button class="btn-back" onclick="App.goTo('count')">‹ Conteo</button>
+    <h3>Diferencias</h3>
+    <button class="btn-text-sm" id="btnLoadKame" onclick="App.loadKameStock()">↻ KAME</button>
+  </div>
+
+  <div class="review-summary" id="reviewSummary">
+    <div class="summary-stat">
+      <span class="stat-num" id="statContados">0</span>
+      <span class="stat-label">Contados</span>
+    </div>
+    <div class="summary-stat">
+      <span class="stat-num ok" id="statOk">0</span>
+      <span class="stat-label">Coinciden</span>
+    </div>
+    <div class="summary-stat">
+      <span class="stat-num warn" id="statDiff">0</span>
+      <span class="stat-label">Diferencias</span>
+    </div>
+  </div>
+
+  <div class="filter-chips">
+    <button class="chip active" onclick="App.filterReview('all', this)">Todos</button>
+    <button class="chip" onclick="App.filterReview('diff', this)">Con diferencia</button>
+    <button class="chip" onclick="App.filterReview('ok', this)">Coinciden</button>
+  </div>
+
+  <div class="review-list" id="reviewList"></div>
+
+  <div class="bottom-action">
+    <button class="btn-primary" onclick="App.goTo('sync')" id="btnGoSync">Subir a KAME →</button>
+  </div>
+</div>
+
+<!-- ══ SINCRONIZACIÓN ════════════════════════════════════════════════════ -->
+<div id="sync" class="screen">
+  <div class="nav-bar">
+    <button class="btn-back" onclick="App.goTo('review')">‹ Revisión</button>
+    <h3>Subir a KAME</h3>
+    <div></div>
+  </div>
+
+  <div class="sync-body">
+    <div class="sync-status-card" id="syncStatusCard">
+      <div class="sync-icon" id="syncIcon">☁️</div>
+      <p class="sync-msg" id="syncMsg">Listo para sincronizar</p>
+      <p class="sync-detail" id="syncDetail"></p>
+    </div>
+
+    <div class="sync-stats">
+      <div class="sync-stat-row">
+        <span>Artículos con diferencia</span>
+        <strong id="syncDiffCount">0</strong>
+      </div>
+      <div class="sync-stat-row">
+        <span>Bodega</span>
+        <strong id="syncBodega">—</strong>
+      </div>
+      <div class="sync-stat-row">
+        <span>Fecha</span>
+        <strong id="syncFecha">—</strong>
+      </div>
+    </div>
+
+    <div class="sync-log" id="syncLog"></div>
+
+    <div class="offline-warning" id="offlineWarning" style="display:none">
+      ⚠️ Sin conexión. El conteo se guardará localmente y se subirá cuando recuperes señal.
+    </div>
+
+    <button class="btn-primary" id="btnDoSync" onclick="App.doSync()">
+      Confirmar y subir
+    </button>
+    <button class="btn-secondary" id="btnSaveLocal" onclick="App.saveLocal()">
+      Guardar localmente
+    </button>
+  </div>
+</div>
+
+<!-- ══ MODAL INGRESO CANTIDAD ═══════════════════════════════════════════ -->
+<div id="modalOverlay" class="modal-overlay" onclick="App.closeModal()">
+  <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <p class="modal-sku" id="modalSku">—</p>
+        <h3 class="modal-desc" id="modalDesc">—</h3>
+        <p class="modal-familia" id="modalFamilia">—</p>
+      </div>
+      <button class="modal-close" onclick="App.closeModal()">✕</button>
+    </div>
+
+    <div class="modal-kame-stock">
+      <span>Stock KAME</span>
+      <strong id="modalKameStock">—</strong>
+    </div>
+
+    <div class="cantidad-input-wrap">
+      <button class="qty-btn" onclick="App.adjustQty(-1)">−</button>
+      <input type="number" id="cantidadInput" inputmode="decimal" min="0" step="1" placeholder="0">
+      <button class="qty-btn" onclick="App.adjustQty(1)">+</button>
+    </div>
+
+    <div class="modal-diff" id="modalDiff"></div>
+
+    <textarea id="modalObs" placeholder="Observación (opcional)" rows="2"></textarea>
+    <button class="btn-primary" onclick="App.saveCount()">Guardar conteo</button>
+  </div>
+</div>
+
+<!-- ══ TOAST ════════════════════════════════════════════════════════════ -->
+<div id="toast" class="toast"></div>
+
+<script src="/articulos.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
