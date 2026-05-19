@@ -11,6 +11,11 @@ function apiHeaders() {
   return API_KEY ? { 'X-API-Key': API_KEY } : {};
 }
 
+
+// Helper: escape HTML para evitar XSS
+function esc(str) {
+  return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
 // ─── USUARIOS AUTORIZADOS ─────────────────────────────────────────────────
 // Agregar/quitar usuarios aquí. PIN hasheado con btoa para ejemplo simple.
 // En producción usar bcrypt en backend.
@@ -857,6 +862,21 @@ const App = {
 
     const msg = `Sincronización completada: ${ok} OK, ${errors} errores`;
     App.toast(msg);
+  },
+
+
+  toast(msg, duration = 2500) {
+    let el = document.getElementById('toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'toast';
+      el.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:10px 20px;border-radius:20px;z-index:9999;font-size:14px;opacity:0;transition:opacity .3s;pointer-events:none;';
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.style.opacity = '1';
+    clearTimeout(el._t);
+    el._t = setTimeout(() => { el.style.opacity = '0'; }, duration);
   },
 
 };
