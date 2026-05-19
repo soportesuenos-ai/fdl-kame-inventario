@@ -372,53 +372,30 @@ const App = {
 
     const hasFilters = Object.values(State.filters).some(v => v !== null);
 
-    // ── MODO BÚSQUEDA O FILTROS ───────────────────────────────────────
-    if (q.length >= 2 || hasFilters) {
-      let arts = App._applyFilters([...State.articles]);
-      if (arts.length === 0) {
-        list.innerHTML = `<div class="empty-state"><span style="font-size:40px">🔍</span><p>Sin resultados — cambiá los filtros</p></div>`;
-        return;
-      }
-      list.innerHTML = `
-        <div class="search-mode-banner">
-          ${q.length >= 2 ? '🔍 Búsqueda' : '🔽 Filtros'} — ${arts.length} resultado${arts.length !== 1 ? 's' : ''}
-        </div>` +
-        arts.slice(0, 150).map(art => App._renderArticleItem(art, sess)).join('');
-      if (arts.length > 150)
-        list.innerHTML += `<div class="empty-state"><p>Mostrando 150 de ${arts.length} — refiná los filtros</p></div>`;
+    // Siempre filtrar sobre todos los artículos
+    let arts = App._applyFilters([...State.articles]);
+
+    if (arts.length === 0) {
+      list.innerHTML = `<div class="empty-state"><span style="font-size:40px">🔍</span><p>Sin resultados — cambiá los filtros</p></div>`;
       return;
     }
 
-    // ── MODO NORMAL: artículos con stock en bodega ────────────────────
-    const extraSkus = sess?.extraSkus || [];
-    let skus = [...State.bodegaList];
-    for (const sku of extraSkus) if (!skus.includes(sku)) skus.push(sku);
+    const pending = arts.filter(a => sess?.items?.[a.sku] === undefined);
+    const done    = arts.filter(a => sess?.items?.[a.sku] !== undefined);
 
-    if (skus.length === 0) {
-      list.innerHTML = `
-        <div class="empty-state">
-          <span style="font-size:40px">🔽</span>
-          <p>Usá los filtros o búsqueda para encontrar artículos</p>
-        </div>`;
-      return;
-    }
-
-    const pending = skus.filter(sku => sess?.items?.[sku] === undefined);
-    const done    = skus.filter(sku => sess?.items?.[sku] !== undefined);
     let html = '';
+    if (q.length >= 2 || hasFilters) {
+      html += `<div class="search-mode-banner">${q.length >= 2 ? '🔍 Búsqueda' : '🔽 Filtros'} — ${arts.length} resultado${arts.length !== 1 ? 's' : ''}</div>`;
+    }
     if (pending.length > 0) {
       html += `<div class="list-section-label">Por contar (${pending.length})</div>`;
-      html += pending.map(sku => {
-        const art = State.articles.find(a => a.sku === sku) || { sku, desc: sku, familia: '' };
-        return App._renderArticleItem(art, sess);
-      }).join('');
+      html += pending.slice(0, 150).map(art => App._renderArticleItem(art, sess)).join('');
+      if (pending.length > 150)
+        html += `<div class="empty-state"><p>Mostrando 150 de ${pending.length} — usá filtros para acotar</p></div>`;
     }
     if (done.length > 0) {
       html += `<div class="list-section-label done-label">Contados (${done.length})</div>`;
-      html += done.map(sku => {
-        const art = State.articles.find(a => a.sku === sku) || { sku, desc: sku, familia: '' };
-        return App._renderArticleItem(art, sess);
-      }).join('');
+      html += done.map(art => App._renderArticleItem(art, sess)).join('');
     }
     list.innerHTML = html;
   },
