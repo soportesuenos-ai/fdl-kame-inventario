@@ -816,4 +816,50 @@ const App = {
       }
 
       // Enviar movimientos
-      const en
+      const entries = Object.entries(sess.items || {});
+      let ok = 0, errors = 0;
+
+      for (const [sku, data] of entries) {
+        const conteo = parseFloat(data.conteo ?? data.count ?? 0);
+        const stock  = parseFloat(kameStock[sku] ?? data.stockKame ?? 0);
+        const diff   = conteo - stock;
+        if (diff === 0) { ok++; continue; }
+
+        const tipo = diff > 0 ? 'ENTRADA' : 'SALIDA';
+        const body = {
+          usuario:        pendingEntry.user || 'sistema',
+          tipoDocumento:  'AJUSTE_INVENTARIO',
+          fecha:          new Date().toISOString().slice(0, 10),
+          motivoMovimiento: tipo,
+          bodegaEntrada:  diff > 0 ? sess.bodega : '',
+          bodegaSalida:   diff < 0 ? sess.bodega : '',
+          comentario:     `Sync pendiente ${sess.fecha || ''} - ${sess.resp || ''}`,
+          items:          [{ sku, cantidad: Math.abs(diff) }],
+        };
+
+        try {
+          const r = await fetch(`${API_BASE}/inventario/movimiento`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json', ...apiHeaders() },
+            body:    JSON.stringify(body),
+          });
+          if (r.ok) ok++;
+          else errors++;
+        } catch(e) {
+          errors++;
+        }
+      }
+
+      if (errors === 0) {
+        await DB.delete('pending', pendingEntry.id ?? pendingEntry.savedAt);
+      }
+    }
+
+    const msg = `Sincronización completada: ${ok} OK, ${errors} errores`;
+    App.toast(msg);
+  },
+
+};
+
+// ── BOOT ──────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => App.init());
