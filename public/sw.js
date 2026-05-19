@@ -1,7 +1,7 @@
 // ── VERSIÓN DEL CACHE ──────────────────────────────────────────────────────
 // ⚠️  IMPORTANTE: Cambiar este valor con cada deploy para forzar actualización
 //    en todos los dispositivos. Usar formato YYYY-MM-DD-vN.
-const CACHE  = 'kame-inv-2026-05-19-v1';
+const CACHE  = 'kame-inv-2026-05-19-v2';
 const ASSETS = ['/', '/index.html', '/app.js', '/style.css', '/articulos.js', '/manifest.json'];
 
 self.addEventListener('install', e => {

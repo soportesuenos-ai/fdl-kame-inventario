@@ -145,7 +145,7 @@ const App = {
 
     // Fallback 1: IndexedDB (más rápido)
     const cached = await DB.getAll('articles');
-    if (cached.length > 0) {
+    if (cached.length > 0 && cached.some(a => a.desc)) {
       State.articles = cached;
       document.getElementById('splashStatus').textContent = `${State.articles.length} artículos cargados`;
       return;
@@ -159,7 +159,7 @@ const App = {
           const data = await resp.json();
           State.articles = (data.items || data || []).map(a => ({
             sku:     a.sku || a.SKU,
-            desc:    (a.descripcion || a['Descripción'] || '').trim(),
+            desc:    (a.desc || a.descripcion || a['Descripcion'] || a['Descripción'] || '').trim(),
             familia: a.familia || a['Familia'] || '',
           }));
           await DB.saveAll('articles', State.articles);
