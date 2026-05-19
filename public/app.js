@@ -3,7 +3,13 @@
    Offline-first PWA para toma de inventario
 ══════════════════════════════════════════════════════════════════════════ */
 
-const API_BASE = window.KAME_API_URL || 'https://fdl-kame-api.onrender.com';
+const API_BASE    = window.KAME_API_URL  || 'https://fdl-kame-api.onrender.com';
+const API_KEY     = window.KAME_API_KEY  || '';   // Setear en index.html: <script>window.KAME_API_KEY='...'</script>
+
+// Helper: headers con API key para todos los fetch a la API
+function apiHeaders() {
+  return API_KEY ? { 'X-API-Key': API_KEY } : {};
+}
 
 // ─── USUARIOS AUTORIZADOS ─────────────────────────────────────────────────
 // Agregar/quitar usuarios aquí. PIN hasheado con btoa para ejemplo simple.
@@ -78,6 +84,16 @@ const DB = {
       tx.oncomplete = () => res();
       tx.onerror = () => rej(tx.error);
     });
+  },
+  // Bulk write — mucho más rápido que await secuencial para lotes grandes
+  async saveAll(store, items) {
+    return new Promise((res, rej) => {
+      const tx  = db.transaction(store, 'readwrite');
+      const obj = tx.objectStore(store);
+      for (const item of items) obj.put(item);
+      tx.oncomplete = () => res();
+      tx.onerror    = () => rej(tx.error);
+    });
   }
 };
 
@@ -133,7 +149,7 @@ const App = {
     // Fallback 2: API KAME
     if (State.isOnline) {
       try {
-        const resp = await fetch(`${API_BASE}/maestro/articulos`);
+        const resp = await fetch(`${API_BASE}/maestro/articulos`, { headers: apiHeaders() });
         if (resp.ok) {
           const data = await resp.json();
           State.articles = (data.items || data || []).map(a => ({
@@ -141,21 +157,26 @@ const App = {
             desc:    (a.descripcion || a['Descripción'] || '').trim(),
             familia: a.familia || a['Familia'] || '',
           }));
-          for (const art of State.articles) await DB.save('articles', art);
+          await DB.saveAll('articles', State.articles);
           document.getElementById('splashStatus').textContent = `${State.articles.length} artículos cargados`;
           return;
         }
       } catch(e) {}
     }
 
-    // Fallback 3: articulos.js via fetch
+    // Fallback 3: variable global ARTICULOS_LOCAL definida en articulos.js (ya cargado como <script>)
     try {
       document.getElementById('splashStatus').textContent = 'Cargando maestro local...';
-      const resp = await fetch('/articulos.js');
-      const text = await resp.text();
-      const json = text.replace('const ARTICULOS_LOCAL = ', '').replace(/;\s*$/, '');
-      State.articles = JSON.parse(json);
-      for (const art of State.articles) await DB.save('articles', art);
+      if (typeof ARTICULOS_LOCAL !== 'undefined' && ARTICULOS_LOCAL.length > 0) {
+        State.articles = ARTICULOS_LOCAL;
+      } else {
+        // Último recurso: fetch + parse del archivo
+        const resp = await fetch('/articulos.js');
+        const text = await resp.text();
+        const json = text.replace('const ARTICULOS_LOCAL = ', '').replace(/;\s*$/, '');
+        State.articles = JSON.parse(json);
+      }
+      await DB.saveAll('articles', State.articles);
       document.getElementById('splashStatus').textContent = `${State.articles.length} artículos cargados`;
     } catch(e) {
       document.getElementById('splashStatus').textContent = 'Sin artículos';
@@ -298,7 +319,7 @@ const App = {
 
     try {
       const bodega = encodeURIComponent(State.currentSession.bodega);
-      const resp   = await fetch(`${API_BASE}/inventario/stock/bodega/${bodega}`);
+      const resp   = await fetch(`${API_BASE}/inventario/stock/bodega/${bodega}`, { headers: apiHeaders() });
       if (resp.ok) {
         const data  = await resp.json();
         const items = data.items || data || [];
@@ -397,91 +418,11 @@ const App = {
     list.innerHTML = html;
   },
 
+  _searchTimer: null,
   search(q) {
     State.searchQuery = q;
-    App.renderArticleList();
-  },
-
-    document.getElementById('countBodega').textContent = sess?.bodega || '—';
-
-    const counted = Object.keys(sess?.items || {}).length;
-    document.getElementById('countProgress').textContent =
-      `${counted} contado${counted !== 1 ? 's' : ''}`;
-    document.getElementById('fabNumber').textContent = counted;
-
-    // ── MODO BÚSQUEDA: catálogo completo ──────────────────────────────
-    if (q.length >= 2) {
-      const family = State.filteredFamily;
-      let arts = State.articles.filter(a =>
-        a.desc.toLowerCase().includes(q) ||
-        (a.sku || '').toLowerCase().includes(q)
-      );
-      if (family) arts = arts.filter(a => a.familia === family);
-
-      if (arts.length === 0) {
-        list.innerHTML = `<div class="empty-state"><span style="font-size:40px">🔍</span><p>Sin resultados</p></div>`;
-        return;
-      }
-
-      list.innerHTML = `
-        <div class="search-mode-banner">
-          🔍 Buscando en catálogo completo — ${arts.length} resultado${arts.length !== 1 ? 's' : ''}
-        </div>` +
-        arts.slice(0, 100).map(art => App._renderArticleItem(art, sess)).join('');
-      return;
-    }
-
-    // ── MODO NORMAL: artículos con stock en bodega ────────────────────
-    const family = State.filteredFamily;
-
-    // Construir lista: bodegaList + extras agregados manualmente
-    const extraSkus = sess?.extraSkus || [];
-    let skus = [...State.bodegaList];
-
-    // Agregar extras que no estén ya
-    for (const sku of extraSkus)
-      if (!skus.includes(sku)) skus.push(sku);
-
-    // Filtro familia
-    if (family) {
-      skus = skus.filter(sku => {
-        const art = State.articles.find(a => a.sku === sku);
-        return art?.familia === family;
-      });
-    }
-
-    if (skus.length === 0) {
-      list.innerHTML = `
-        <div class="empty-state">
-          <span style="font-size:40px">${State.isOnline ? '📭' : '📵'}</span>
-          <p>${State.bodegaList.length === 0
-            ? 'Sin stock cargado — busca artículos arriba'
-            : 'Sin artículos en esta familia'}</p>
-        </div>`;
-      return;
-    }
-
-    // Agrupar: primero los pendientes de contar, luego los ya contados
-    const pending  = skus.filter(sku => sess?.items?.[sku] === undefined);
-    const done     = skus.filter(sku => sess?.items?.[sku] !== undefined);
-
-    let html = '';
-    if (pending.length > 0) {
-      html += `<div class="list-section-label">Por contar (${pending.length})</div>`;
-      html += pending.map(sku => {
-        const art = State.articles.find(a => a.sku === sku) || { sku, desc: sku, familia: '' };
-        return App._renderArticleItem(art, sess);
-      }).join('');
-    }
-    if (done.length > 0) {
-      html += `<div class="list-section-label done-label">Contados (${done.length})</div>`;
-      html += done.map(sku => {
-        const art = State.articles.find(a => a.sku === sku) || { sku, desc: sku, familia: '' };
-        return App._renderArticleItem(art, sess);
-      }).join('');
-    }
-
-    list.innerHTML = html;
+    clearTimeout(App._searchTimer);
+    App._searchTimer = setTimeout(() => App.renderArticleList(), 200);
   },
 
   _renderArticleItem(art, sess) {
@@ -784,7 +725,7 @@ const App = {
 
         const resp = await fetch(`${API_BASE}/inventario/movimiento`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...apiHeaders() },
           body: JSON.stringify(body)
         });
 
@@ -846,45 +787,33 @@ const App = {
   },
 
   async trySyncPending() {
-    const pending = await DB.getAll('pending');
-    if (pending.length === 0) return;
-    App.toast(`🔄 Sincronizando ${pending.length} sesión(es) pendiente(s)...`);
-    // TODO: procesar pending (mismo flujo que doSync)
-    App.refreshHomeState();
-  },
+    const pendingList = await DB.getAll('pending');
+    if (pendingList.length === 0) return;
 
-  // ── QR (próximamente) ─────────────────────────────────────────────────
-  qrNotReady() {
-    App.toast('📷 Escaneo QR — próximamente');
-  },
+    App.toast(`🔄 Sincronizando ${pendingList.length} sesión(es) pendiente(s)...`);
 
-  // ── TOAST ─────────────────────────────────────────────────────────────
-  _toastTimer: null,
-  toast(msg) {
-    const el = document.getElementById('toast');
-    el.textContent = msg;
-    el.classList.add('show');
-    clearTimeout(App._toastTimer);
-    App._toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
-  },
-};
+    for (const pendingEntry of pendingList) {
+      const sess = pendingEntry.session;
+      if (!sess || !sess.items) continue;
 
-// ─── INPUT LIVE DIFF ──────────────────────────────────────────────────────
-document.getElementById('cantidadInput').addEventListener('input', () => App.updateModalDiff());
+      // Intentar obtener stock de bodega para calcular diferencias
+      let kameStock = {};
+      try {
+        const bodega = encodeURIComponent(sess.bodega);
+        const r = await fetch(`${API_BASE}/inventario/stock/bodega/${bodega}`, { headers: apiHeaders() });
+        if (r.ok) {
+          const data  = await r.json();
+          const items = data.items || data || [];
+          for (const item of items) {
+            const sku = item.sku || item.SKU || item.articulo || item.Articulo;
+            const qty = parseFloat(item.stock ?? item.cantidad ?? item.saldo ?? 0);
+            if (sku && qty > 0) kameStock[sku] = qty;
+          }
+        }
+      } catch(e) {
+        App.toast('Sin conexión para sincronizar pendientes');
+        return;
+      }
 
-// ─── ENTER en login ───────────────────────────────────────────────────────
-document.getElementById('loginPin').addEventListener('keydown', e => {
-  if (e.key === 'Enter') App.login();
-});
-
-// ─── HELPERS ──────────────────────────────────────────────────────────────
-function esc(str) {
-  return String(str ?? '')
-    .replace(/&/g,'&amp;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;');
-}
-
-// ─── BOOT ─────────────────────────────────────────────────────────────────
-App.init();
+      // Enviar movimientos
+      const en
