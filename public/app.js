@@ -365,15 +365,18 @@ const App = {
     const isSearching = textSearch || hasFilters;
 
     let arts;
-    if (State.bodegaList.length > 0 && !textSearch) {
-      // Vista bodega: artículos con stock + extras. Los filtros de chip aplican dentro de la bodega.
+    if (isSearching) {
+      // Búsqueda o filtros: catálogo completo
+      arts = App._applyFilters([...State.articles]);
+    } else {
+      // Sin búsqueda: mostrar TODOS los artículos del maestro.
+      // Los que tienen stock en KAME para esta bodega van primero (son los esperados).
+      // Los demás igual aparecen para poder contar lo que hay físicamente aunque KAME no lo registre.
       const bodegaSet = new Set(State.bodegaList);
       const extraSet  = new Set(sess?.extraSkus || []);
-      const base = State.articles.filter(a => bodegaSet.has(a.sku) || extraSet.has(a.sku));
-      arts = hasFilters ? App._applyFilters(base) : base;
-    } else {
-      // Búsqueda de texto: catálogo completo (permite encontrar y agregar artículos extra)
-      arts = App._applyFilters([...State.articles]);
+      const conStock  = State.articles.filter(a => bodegaSet.has(a.sku) || extraSet.has(a.sku));
+      const sinStock  = State.articles.filter(a => !bodegaSet.has(a.sku) && !extraSet.has(a.sku));
+      arts = [...conStock, ...sinStock];
     }
 
     if (arts.length === 0) {
@@ -389,10 +392,13 @@ const App = {
       html += `<div class="search-mode-banner">${q.length >= 2 ? '🔍 Búsqueda' : '🔽 Filtros'} — ${arts.length} resultado${arts.length !== 1 ? 's' : ''}</div>`;
     }
     if (pending.length > 0) {
-      html += `<div class="list-section-label">Por contar (${pending.length})</div>`;
+      const label = !isSearching && State.bodegaList.length > 0
+        ? `Con stock KAME (${Math.min(pending.length, State.bodegaList.length)}) + sin stock (${Math.max(0, pending.length - State.bodegaList.length)}) — total ${pending.length}`
+        : `Por contar (${pending.length})`;
+      html += `<div class="list-section-label">${label}</div>`;
       html += pending.slice(0, 150).map(art => App._renderArticleItem(art, sess)).join('');
       if (pending.length > 150)
-        html += `<div class="empty-state"><p>Mostrando 150 de ${pending.length} — usá filtros para acotar</p></div>`;
+        html += `<div class="empty-state"><p>Mostrando 150 de ${pending.length} — usá búsqueda o filtros para acotar</p></div>`;
     }
     if (done.length > 0) {
       html += `<div class="list-section-label done-label">Contados (${done.length})</div>`;
