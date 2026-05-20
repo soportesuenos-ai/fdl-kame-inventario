@@ -173,16 +173,25 @@
 
   <div class="filter-panel" id="filterPanel" style="display:none">
     <div class="filter-row">
-      <span class="filter-label">Familia</span>
+      <span class="filter-label">Especie</span>
       <div class="filter-chips-row" id="filterFamilia">
         <button class="chip active" onclick="App.setFilter('familia', null, this)">Todas</button>
         <button class="chip" onclick="App.setFilter('familia', 'OREGON', this)">Oregon</button>
         <button class="chip" onclick="App.setFilter('familia', 'NATIVO', this)">Nativo</button>
         <button class="chip" onclick="App.setFilter('familia', 'INSIGNE', this)">Insigne</button>
         <button class="chip" onclick="App.setFilter('familia', 'ROBLE', this)">Roble</button>
-        <button class="chip" onclick="App.setFilter('familia', 'ROLLIZOS Y ESTACAS', this)">Rollizos</button>
+        <button class="chip" onclick="App.setFilter('familia', 'ALAMO', this)">Álamo</button>
+        <button class="chip" onclick="App.setFilter('familia', 'CIPRES', this)">Ciprés</button>
+        <button class="chip" onclick="App.setFilter('familia', 'ROLLIZO', this)">Rollizos</button>
         <button class="chip" onclick="App.setFilter('familia', 'PELLET', this)">Pellet</button>
-        <button class="chip" onclick="App.setFilter('familia', 'SUBPRODUCTOS', this)">Subproductos</button>
+      </div>
+    </div>
+    <div class="filter-row">
+      <span class="filter-label">Stock KAME</span>
+      <div class="filter-chips-row" id="filterStock">
+        <button class="chip active" onclick="App.setFilter('stock', null, this)">Todos</button>
+        <button class="chip" onclick="App.setFilter('stock', 'con', this)">Con stock</button>
+        <button class="chip" onclick="App.setFilter('stock', 'sin', this)">Sin stock</button>
       </div>
     </div>
     <div class="filter-row">

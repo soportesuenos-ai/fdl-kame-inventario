@@ -33,7 +33,7 @@ const State = {
   articles:      [],
   kameStock:     {},
   bodegaList:    [],
-  filters: { familia: null, tipo: null, calidad: null, condicion: null, proceso: null },
+  filters: { familia: null, tipo: null, calidad: null, condicion: null, proceso: null, stock: null },
   searchQuery:   '',
   reviewFilter:  'all',
   isOnline:      navigator.onLine,
@@ -440,11 +440,15 @@ const App = {
     const f = State.filters;
     const q = (State.searchQuery || '').toUpperCase();
     if (q.length >= 2) arts = arts.filter(a => (a.desc||'').toUpperCase().includes(q) || (a.sku||'').toUpperCase().includes(q));
-    if (f.familia)   arts = arts.filter(a => (a.familia||'') === f.familia);
+    // familia filtra por texto en descripción para capturar artículos sin familia asignada en KAME
+    // (ej: "OREGON" trae maderas oregon Y rollizos industriales cc oregon)
+    if (f.familia)   arts = arts.filter(a => (a.desc||'').toUpperCase().includes(f.familia) || (a.familia||'').toUpperCase().includes(f.familia));
     if (f.tipo)      arts = arts.filter(a => (a.desc||'').toUpperCase().startsWith(f.tipo));
     if (f.calidad)   arts = arts.filter(a => (a.desc||'').includes(f.calidad));
     if (f.condicion) arts = arts.filter(a => (a.desc||'').toUpperCase().includes(f.condicion));
     if (f.proceso)   arts = arts.filter(a => (a.desc||'').toUpperCase().includes(f.proceso));
+    if (f.stock === 'con')  arts = arts.filter(a => (State.kameStock[a.sku] || 0) > 0);
+    if (f.stock === 'sin')  arts = arts.filter(a => !(State.kameStock[a.sku] > 0));
     return arts;
   },
 
@@ -458,7 +462,7 @@ const App = {
 
   setFilter(type, value, btn) {
     State.filters[type] = value;
-    const rowId = { familia: 'filterFamilia', tipo: 'filterTipo', calidad: 'filterCalidad', condicion: 'filterCondicion', proceso: 'filterProceso' }[type];
+    const rowId = { familia: 'filterFamilia', tipo: 'filterTipo', calidad: 'filterCalidad', condicion: 'filterCondicion', proceso: 'filterProceso', stock: 'filterStock' }[type];
     document.querySelectorAll(`#${rowId} .chip`).forEach(c => c.classList.remove('active'));
     btn.classList.add('active');
     const activeCount = Object.values(State.filters).filter(v => v !== null).length;
@@ -469,8 +473,8 @@ const App = {
   },
 
   clearFilters() {
-    State.filters = { familia: null, tipo: null, calidad: null, condicion: null, proceso: null };
-    ['filterFamilia','filterTipo','filterCalidad','filterCondicion','filterProceso'].forEach(id => {
+    State.filters = { familia: null, tipo: null, calidad: null, condicion: null, proceso: null, stock: null };
+    ['filterFamilia','filterTipo','filterCalidad','filterCondicion','filterProceso','filterStock'].forEach(id => {
       const chips = document.querySelectorAll(`#${id} .chip`);
       chips.forEach(c => c.classList.remove('active'));
       if (chips[0]) chips[0].classList.add('active');
