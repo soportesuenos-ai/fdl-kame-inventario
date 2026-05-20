@@ -144,26 +144,21 @@ const App = {
     const statusEl = document.getElementById('splashStatus');
     statusEl.textContent = 'Cargando artículos...';
 
-    // Fallback 1: IndexedDB — catálogo completo ya descargado en sesión anterior
-    const cached = await DB.getAll('articles');
-    if (cached.length > 500 && cached.some(a => a.desc)) {
-      State.articles = cached;
-      statusEl.textContent = `${State.articles.length} artículos cargados`;
-      return;
-    }
+    const normalize = a => ({
+      sku:     (a.sku || a.SKU || '').trim(),
+      desc:    (a.desc || a.descripcion || a['Descripcion'] || a['Descripción'] || '').trim(),
+      familia: (a.familia || a['Familia'] || '').trim(),
+    });
 
-    // Fallback 2: API KAME — endpoint que devuelve todos los artículos paginando
+    // Con conexión: siempre descarga el catálogo fresco desde KAME y actualiza caché.
+    // Así nuevos artículos (rollizos, trozos, etc.) siempre están disponibles.
     if (State.isOnline) {
       try {
         statusEl.textContent = 'Descargando catálogo KAME...';
         const resp = await fetch(`${API_BASE}/maestro/articulos/todos`, { headers: apiHeaders() });
         if (resp.ok) {
           const data = await resp.json();
-          State.articles = (data.items || data || []).map(a => ({
-            sku:     (a.sku || a.SKU || '').trim(),
-            desc:    (a.desc || a.descripcion || a['Descripcion'] || a['Descripción'] || '').trim(),
-            familia: (a.familia || a['Familia'] || '').trim(),
-          }));
+          State.articles = (data.items || data || []).map(normalize);
           await DB.saveAll('articles', State.articles);
           statusEl.textContent = `${State.articles.length} artículos cargados`;
           return;
@@ -171,16 +166,13 @@ const App = {
       } catch(e) {}
     }
 
-    // Sin conexión y sin caché — la app no puede operar sin artículos previos
+    // Sin conexión: usar caché IndexedDB (cualquier tamaño sirve para operar offline)
+    const cached = await DB.getAll('articles');
     if (cached.length > 0) {
-      State.articles = cached.map(a => ({
-        sku:     (a.sku || a.SKU || '').trim(),
-        desc:    (a.desc || a.descripcion || a['Descripcion'] || a['Descripción'] || '').trim(),
-        familia: (a.familia || a['Familia'] || '').trim(),
-      }));
-      statusEl.textContent = `${State.articles.length} artículos (caché offline)`;
+      State.articles = cached.map(normalize);
+      statusEl.textContent = `${State.articles.length} artículos (modo offline)`;
     } else {
-      statusEl.textContent = 'Sin artículos — conectate a internet para descargar el catálogo';
+      statusEl.textContent = 'Sin artículos — necesitás conexión para la primera carga';
     }
   },
 
