@@ -1,7 +1,4 @@
-// ── VERSIÓN DEL CACHE ──────────────────────────────────────────────────────
-// ⚠️  IMPORTANTE: Cambiar este valor con cada deploy para forzar actualización
-//    en todos los dispositivos. Usar formato YYYY-MM-DD-vN.
-const CACHE  = 'kame-inv-2026-05-19-v3';
+const CACHE  = 'kame-inv-v4';
 const ASSETS = ['/', '/index.html', '/app.js', '/style.css', '/articulos.js', '/manifest.json'];
 
 self.addEventListener('install', e => {
@@ -10,7 +7,6 @@ self.addEventListener('install', e => {
 });
 
 self.addEventListener('activate', e => {
-  // Eliminar caches viejos automáticamente
   e.waitUntil(
     caches.keys().then(keys =>
       Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
@@ -19,4 +15,8 @@ self.addEventListener('activate', e => {
   self.clients.claim();
 });
 
-self.addEventListene
+self.addEventListener('fetch', e => {
+  e.respondWith(
+    caches.match(e.request).then(cached => cached || fetch(e.request))
+  );
+});

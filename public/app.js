@@ -498,7 +498,7 @@ const App = {
     // Si viene de búsqueda y no es de bodega ni extra → preguntar si agregar
     const enBodega = State.bodegaList.includes(sku);
     const esExtra  = (State.currentSession?.extraSkus || []).includes(sku);
-    if (!enBodega && !esExtra && State.searchQuery.length >= 2) {
+    if (State.bodegaList.length > 0 && !enBodega && !esExtra && State.searchQuery.length >= 2) {
       App.addExtraArticle(sku);
       return;
     }
