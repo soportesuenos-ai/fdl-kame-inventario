@@ -12,5 +12,11 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "config": {
+    "env": {
+      "KAME_API_URL": "URL de fdl-kame-api (ej: https://fdl-kame-api.onrender.com)",
+      "KAME_API_KEY": "Clave X-API-Key para autenticar contra la API"
+    }
   }
 }

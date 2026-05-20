@@ -172,15 +172,22 @@ const App = {
     // Fallback 3: variable global ARTICULOS_LOCAL definida en articulos.js (ya cargado como <script>)
     try {
       document.getElementById('splashStatus').textContent = 'Cargando maestro local...';
+      let raw;
       if (typeof ARTICULOS_LOCAL !== 'undefined' && ARTICULOS_LOCAL.length > 0) {
-        State.articles = ARTICULOS_LOCAL;
+        raw = ARTICULOS_LOCAL;
       } else {
         // Último recurso: fetch + parse del archivo
         const resp = await fetch('/articulos.js');
         const text = await resp.text();
         const json = text.replace('const ARTICULOS_LOCAL = ', '').replace(/;\s*$/, '');
-        State.articles = JSON.parse(json);
+        raw = JSON.parse(json);
       }
+      // Normalizar al mismo formato que el path de API para que desc/familia siempre existan
+      State.articles = raw.map(a => ({
+        sku:     a.sku || a.SKU || '',
+        desc:    (a.desc || a.descripcion || a['Descripcion'] || a['Descripción'] || '').trim(),
+        familia: a.familia || a['Familia'] || '',
+      }));
       await DB.saveAll('articles', State.articles);
       document.getElementById('splashStatus').textContent = `${State.articles.length} artículos cargados`;
     } catch(e) {
@@ -198,7 +205,9 @@ const App = {
       document.getElementById('loginPin').value = '';
       return;
     }
-    State.currentUser = { user, ...USERS[user] };
+    // Guardar usuario sin el PIN
+    const { pin: _pin, ...userInfo } = USERS[user];
+    State.currentUser = { user, ...userInfo };
     sessionStorage.setItem('kameUser', JSON.stringify(State.currentUser));
     err.textContent = '';
     App.showHome();
@@ -361,7 +370,6 @@ const App = {
 
   // ── ARTICLE LIST ──────────────────────────────────────────────────────
   renderArticleList() {
-    const q    = (State.searchQuery || '').toUpperCase();
     const sess = State.currentSession;
     const list = document.getElementById('articleList');
 
@@ -370,13 +378,23 @@ const App = {
     document.getElementById('countProgress').textContent = `${counted} contado${counted !== 1 ? 's' : ''}`;
     document.getElementById('fabNumber').textContent = counted;
 
+    const q          = (State.searchQuery || '').toUpperCase();
     const hasFilters = Object.values(State.filters).some(v => v !== null);
+    const isSearching = q.length >= 2 || hasFilters;
 
-    // Siempre filtrar sobre todos los artículos
-    let arts = App._applyFilters([...State.articles]);
+    let arts;
+    if (!isSearching && State.bodegaList.length > 0) {
+      // Vista por defecto: solo artículos con stock en la bodega + extras agregados manualmente
+      const bodegaSet = new Set(State.bodegaList);
+      const extraSet  = new Set(sess?.extraSkus || []);
+      arts = State.articles.filter(a => bodegaSet.has(a.sku) || extraSet.has(a.sku));
+    } else {
+      // Búsqueda o filtros activos: buscar sobre catálogo completo
+      arts = App._applyFilters([...State.articles]);
+    }
 
     if (arts.length === 0) {
-      list.innerHTML = `<div class="empty-state"><span style="font-size:40px">🔍</span><p>Sin resultados — cambiá los filtros</p></div>`;
+      list.innerHTML = `<div class="empty-state"><span style="font-size:40px">🔍</span><p>Sin resultados${isSearching ? ' — cambiá los filtros' : ''}</p></div>`;
       return;
     }
 
@@ -384,7 +402,7 @@ const App = {
     const done    = arts.filter(a => sess?.items?.[a.sku] !== undefined);
 
     let html = '';
-    if (q.length >= 2 || hasFilters) {
+    if (isSearching) {
       html += `<div class="search-mode-banner">${q.length >= 2 ? '🔍 Búsqueda' : '🔽 Filtros'} — ${arts.length} resultado${arts.length !== 1 ? 's' : ''}</div>`;
     }
     if (pending.length > 0) {
@@ -432,12 +450,12 @@ const App = {
   _applyFilters(arts) {
     const f = State.filters;
     const q = (State.searchQuery || '').toUpperCase();
-    if (q.length >= 2) arts = arts.filter(a => a.desc.toUpperCase().includes(q) || (a.sku||'').toUpperCase().includes(q));
-    if (f.familia)   arts = arts.filter(a => a.familia === f.familia);
-    if (f.tipo)      arts = arts.filter(a => a.desc.toUpperCase().startsWith(f.tipo));
-    if (f.calidad)   arts = arts.filter(a => a.desc.includes(f.calidad));
-    if (f.condicion) arts = arts.filter(a => a.desc.toUpperCase().includes(f.condicion));
-    if (f.proceso)   arts = arts.filter(a => a.desc.toUpperCase().includes(f.proceso));
+    if (q.length >= 2) arts = arts.filter(a => (a.desc||'').toUpperCase().includes(q) || (a.sku||'').toUpperCase().includes(q));
+    if (f.familia)   arts = arts.filter(a => (a.familia||'') === f.familia);
+    if (f.tipo)      arts = arts.filter(a => (a.desc||'').toUpperCase().startsWith(f.tipo));
+    if (f.calidad)   arts = arts.filter(a => (a.desc||'').includes(f.calidad));
+    if (f.condicion) arts = arts.filter(a => (a.desc||'').toUpperCase().includes(f.condicion));
+    if (f.proceso)   arts = arts.filter(a => (a.desc||'').toUpperCase().includes(f.proceso));
     return arts;
   },
 
@@ -774,6 +792,8 @@ const App = {
 
     App.toast(`🔄 Sincronizando ${pendingList.length} sesión(es) pendiente(s)...`);
 
+    let totalOk = 0, totalErrors = 0;
+
     for (const pendingEntry of pendingList) {
       const sess = pendingEntry.session;
       if (!sess || !sess.items) continue;
@@ -797,26 +817,26 @@ const App = {
         return;
       }
 
-      // Enviar movimientos
+      // Enviar movimientos — contador por sesión para decidir si eliminar
       const entries = Object.entries(sess.items || {});
-      let ok = 0, errors = 0;
+      let sessionOk = 0, sessionErrors = 0;
 
       for (const [sku, data] of entries) {
-        const conteo = parseFloat(data.conteo ?? data.count ?? 0);
+        const conteo = parseFloat(data.qty ?? data.conteo ?? data.count ?? 0);
         const stock  = parseFloat(kameStock[sku] ?? data.stockKame ?? 0);
         const diff   = conteo - stock;
-        if (diff === 0) { ok++; continue; }
+        if (diff === 0) { sessionOk++; continue; }
 
         const tipo = diff > 0 ? 'ENTRADA' : 'SALIDA';
         const body = {
-          usuario:        pendingEntry.user || 'sistema',
-          tipoDocumento:  'AJUSTE_INVENTARIO',
-          fecha:          new Date().toISOString().slice(0, 10),
+          usuario:          pendingEntry.user || 'sistema',
+          tipoDocumento:    'AJUSTE_INVENTARIO',
+          fecha:            new Date().toISOString().slice(0, 10),
           motivoMovimiento: tipo,
-          bodegaEntrada:  diff > 0 ? sess.bodega : '',
-          bodegaSalida:   diff < 0 ? sess.bodega : '',
-          comentario:     `Sync pendiente ${sess.fecha || ''} - ${sess.resp || ''}`,
-          items:          [{ sku, cantidad: Math.abs(diff) }],
+          bodegaEntrada:    diff > 0 ? sess.bodega : '',
+          bodegaSalida:     diff < 0 ? sess.bodega : '',
+          comentario:       `Sync pendiente ${sess.fecha || ''} - ${sess.resp || ''}`,
+          items:            [{ sku, cantidad: Math.abs(diff) }],
         };
 
         try {
@@ -825,22 +845,29 @@ const App = {
             headers: { 'Content-Type': 'application/json', ...apiHeaders() },
             body:    JSON.stringify(body),
           });
-          if (r.ok) ok++;
-          else errors++;
+          if (r.ok) sessionOk++;
+          else sessionErrors++;
         } catch(e) {
-          errors++;
+          sessionErrors++;
         }
       }
 
-      if (errors === 0) {
-        await DB.delete('pending', pendingEntry.id ?? pendingEntry.savedAt);
+      totalOk     += sessionOk;
+      totalErrors += sessionErrors;
+
+      // Solo eliminar la sesión pendiente si todos sus movimientos se enviaron OK
+      if (sessionErrors === 0) {
+        await DB.delete('pending', pendingEntry.id);
       }
     }
 
-    const msg = `Sincronización completada: ${ok} OK, ${errors} errores`;
-    App.toast(msg);
+    App.toast(`Sincronización: ${totalOk} OK, ${totalErrors} errores`);
   },
 
+
+  qrNotReady() {
+    App.toast('Escáner QR próximamente — buscá el artículo por nombre o SKU');
+  },
 
   toast(msg, duration = 2500) {
     let el = document.getElementById('toast');
