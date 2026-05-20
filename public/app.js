@@ -821,12 +821,12 @@ const App = {
         const tipo = diff > 0 ? 'ENTRADA' : 'SALIDA';
         const body = {
           usuario:          pendingEntry.user || 'sistema',
-          tipoDocumento:    'AJUSTE_INVENTARIO',
-          fecha:            new Date().toISOString().slice(0, 10),
-          motivoMovimiento: tipo,
+          tipoDocumento:    tipo,
+          fecha:            sess.fecha || new Date().toISOString().slice(0, 10),
+          motivoMovimiento: `Toma de inventario ${sess.fecha || ''} - ${sess.resp || ''}`,
           bodegaEntrada:    diff > 0 ? sess.bodega : '',
           bodegaSalida:     diff < 0 ? sess.bodega : '',
-          comentario:       `Sync pendiente ${sess.fecha || ''} - ${sess.resp || ''}`,
+          comentario:       `Sync pendiente`,
           items:            [{ sku, cantidad: Math.abs(diff) }],
         };
 
