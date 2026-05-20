@@ -141,60 +141,47 @@ const App = {
 
   // ── ARTICLES ──────────────────────────────────────────────────────────
   async loadArticles() {
-    document.getElementById('splashStatus').textContent = 'Cargando artículos...';
+    const statusEl = document.getElementById('splashStatus');
+    statusEl.textContent = 'Cargando artículos...';
 
-    // Fallback 1: IndexedDB — solo si tiene catálogo completo (>1000 artículos)
-    // La API KAME devuelve ~100 artículos; si hay menos en caché significa que
-    // fue poblado desde la API limitada, no desde ARTICULOS_LOCAL.
+    // Fallback 1: IndexedDB — catálogo completo ya descargado en sesión anterior
     const cached = await DB.getAll('articles');
-    if (cached.length > 1000 && cached.some(a => a.desc)) {
+    if (cached.length > 500 && cached.some(a => a.desc)) {
       State.articles = cached;
-      document.getElementById('splashStatus').textContent = `${State.articles.length} artículos cargados`;
+      statusEl.textContent = `${State.articles.length} artículos cargados`;
       return;
     }
 
-    // Fallback 2: ARTICULOS_LOCAL (catálogo completo ~7000 artículos del Excel)
-    // Preferido sobre la API porque la API tiene límite de 100 artículos por página.
-    try {
-      document.getElementById('splashStatus').textContent = 'Cargando maestro local...';
-      let raw;
-      if (typeof ARTICULOS_LOCAL !== 'undefined' && ARTICULOS_LOCAL.length > 0) {
-        raw = ARTICULOS_LOCAL;
-      } else {
-        const resp = await fetch('/articulos.js');
-        const text = await resp.text();
-        const json = text.replace('const ARTICULOS_LOCAL = ', '').replace(/;\s*$/, '');
-        raw = JSON.parse(json);
-      }
-      State.articles = raw.map(a => ({
-        sku:     a.sku || a.SKU || '',
-        desc:    (a.desc || a.descripcion || a['Descripcion'] || a['Descripción'] || '').trim(),
-        familia: a.familia || a['Familia'] || '',
-      }));
-      await DB.saveAll('articles', State.articles);
-      document.getElementById('splashStatus').textContent = `${State.articles.length} artículos cargados`;
-      return;
-    } catch(e) {}
-
-    // Fallback 3: API KAME (limitada a ~100 artículos, último recurso)
+    // Fallback 2: API KAME — endpoint que devuelve todos los artículos paginando
     if (State.isOnline) {
       try {
-        const resp = await fetch(`${API_BASE}/maestro/articulos`, { headers: apiHeaders() });
+        statusEl.textContent = 'Descargando catálogo KAME...';
+        const resp = await fetch(`${API_BASE}/maestro/articulos/todos`, { headers: apiHeaders() });
         if (resp.ok) {
           const data = await resp.json();
           State.articles = (data.items || data || []).map(a => ({
-            sku:     a.sku || a.SKU || '',
+            sku:     (a.sku || a.SKU || '').trim(),
             desc:    (a.desc || a.descripcion || a['Descripcion'] || a['Descripción'] || '').trim(),
-            familia: a.familia || a['Familia'] || '',
+            familia: (a.familia || a['Familia'] || '').trim(),
           }));
           await DB.saveAll('articles', State.articles);
-          document.getElementById('splashStatus').textContent = `${State.articles.length} artículos cargados`;
+          statusEl.textContent = `${State.articles.length} artículos cargados`;
           return;
         }
       } catch(e) {}
     }
 
-    document.getElementById('splashStatus').textContent = 'Sin artículos';
+    // Sin conexión y sin caché — la app no puede operar sin artículos previos
+    if (cached.length > 0) {
+      State.articles = cached.map(a => ({
+        sku:     (a.sku || a.SKU || '').trim(),
+        desc:    (a.desc || a.descripcion || a['Descripcion'] || a['Descripción'] || '').trim(),
+        familia: (a.familia || a['Familia'] || '').trim(),
+      }));
+      statusEl.textContent = `${State.articles.length} artículos (caché offline)`;
+    } else {
+      statusEl.textContent = 'Sin artículos — conectate a internet para descargar el catálogo';
+    }
   },
 
   // ── AUTH ──────────────────────────────────────────────────────────────
