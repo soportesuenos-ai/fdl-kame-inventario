@@ -101,6 +101,14 @@
         </div>
         <div class="action-arrow">›</div>
       </button>
+      <button class="action-card" id="btnConsolidar" onclick="App.goTo('consolidado')" style="display:none">
+        <div class="action-icon">📊</div>
+        <div class="action-text">
+          <strong>Consolidar sesiones</strong>
+          <span>Vista admin multi-usuario</span>
+        </div>
+        <div class="action-arrow">›</div>
+      </button>
     </div>
 
     <div class="pending-banner" id="pendingBanner" style="display:none">
@@ -135,6 +143,10 @@
     <div class="field-group">
       <label>Responsable</label>
       <input type="text" id="sessionResp" placeholder="Nombre del responsable">
+    </div>
+    <div class="field-group">
+      <label>Calle / Sección <span class="opt">(opcional)</span></label>
+      <input type="text" id="sessionCalle" placeholder="Ej: Calle A, Pasillo 3">
     </div>
     <div class="field-group">
       <label>Observaciones <span class="opt">(opcional)</span></label>
@@ -331,6 +343,47 @@
     <button class="btn-secondary" id="btnSaveLocal" onclick="App.saveLocal()">
       Guardar localmente
     </button>
+    <button class="btn-secondary" id="btnSendServer" onclick="App.submitSesion()" style="margin-top:8px">
+      📤 Enviar sesión al servidor
+    </button>
+  </div>
+</div>
+
+<!-- ══ CONSOLIDADO (ADMIN) ════════════════════════════════════════════════ -->
+<div id="consolidado" class="screen">
+  <div class="nav-bar">
+    <button class="btn-back" onclick="App.goTo('home')">‹ Inicio</button>
+    <h3>Consolidar Sesiones</h3>
+    <div></div>
+  </div>
+  <div class="form-body" style="padding-bottom:0">
+    <div class="field-group">
+      <label>Bodega</label>
+      <select id="consoBodega">
+        <option value="">— Seleccionar —</option>
+        <option value="PATIO SECO">PATIO SECO</option>
+        <option value="PATIO VERDE">PATIO VERDE</option>
+        <option value="CANCHA DE TROZOS">CANCHA DE TROZOS</option>
+        <option value="SALA DE VENTAS VILLARRICA">SALA DE VENTAS VILLARRICA</option>
+        <option value="PATIO PELLET">PATIO PELLET</option>
+      </select>
+    </div>
+    <button class="btn-secondary" onclick="App.cargarConsolidado()">↻ Cargar sesiones</button>
+  </div>
+  <div class="sync-stats" id="consoStats" style="display:none">
+    <div class="sync-stat-row"><span>Sesiones recibidas</span><strong id="consoNumSesiones">0</strong></div>
+    <div class="sync-stat-row"><span>SKUs contados</span><strong id="consoNumSkus">0</strong></div>
+    <div class="sync-stat-row"><span>Con diferencia</span><strong id="consoNumDiffs">0</strong></div>
+  </div>
+  <div class="filter-chips" id="consoFilterBar" style="display:none">
+    <button class="chip active" onclick="App.filterConsolidado('all', this)">Todos</button>
+    <button class="chip" onclick="App.filterConsolidado('diff', this)">Con diferencia</button>
+    <button class="chip" onclick="App.filterConsolidado('ok', this)">Coinciden</button>
+  </div>
+  <div class="review-list" id="consoList"></div>
+  <div class="bottom-action" id="consoActions" style="display:none">
+    <button class="btn-primary" onclick="App.generarMovimientos()">Generar movimientos en KAME →</button>
+    <button class="btn-secondary" style="margin-top:8px" onclick="App.clearSesiones()">🗑 Limpiar sesiones del servidor</button>
   </div>
 </div>
 
