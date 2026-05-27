@@ -548,6 +548,26 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
 }
 .empty-state p { font-family: var(--font-head); font-size: 18px; margin-top: 8px; }
 
+/* ═══ BOTÓN FLOTANTE HOME ════════════════════════════════════════════════ */
+.btn-float-home {
+  position: fixed;
+  bottom: calc(24px + var(--safe-bot));
+  left: 20px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text1);
+  font-size: 20px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  cursor: pointer;
+}
+
 /* ═══ FAB ════════════════════════════════════════════════════════════════ */
 .fab {
   position: fixed;

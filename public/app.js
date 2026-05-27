@@ -211,6 +211,11 @@ const App = {
     if (screen === 'review')      App.renderReview();
     if (screen === 'sync')        App.renderSync();
     if (screen === 'consolidado') App.initConsolidado();
+
+    // Botón flotante home: visible en pantallas de trabajo, oculto en home/login/splash
+    const noHome = ['home', 'login', 'splash', 'newSession'];
+    const fab = document.getElementById('btnFloatHome');
+    if (fab) fab.style.display = noHome.includes(screen) ? 'none' : 'flex';
   },
 
   showHome() {
