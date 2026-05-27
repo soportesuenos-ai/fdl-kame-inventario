@@ -812,6 +812,7 @@ const App = {
         fecha:     sess.fecha,
         items,
       };
+      console.log('[submitSesion] body a enviar:', JSON.stringify(body));
       const resp = await fetch(`${API_BASE}/inventario/sesiones`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', ...apiHeaders() },

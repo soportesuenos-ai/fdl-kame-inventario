@@ -7,14 +7,23 @@ const PORT = process.env.PORT || 3000;
 const KAME_API_URL = process.env.KAME_API_URL || 'https://fdl-kame-api.onrender.com';
 const KAME_API_KEY = process.env.KAME_API_KEY || '';
 
+// Capturar body raw (Buffer) para reenviarlo sin re-parsear
+app.use(express.raw({ type: '*/*', limit: '2mb' }));
+
 // Proxy: /api/* → fdl-kame-api (agrega API key server-side, elimina CORS)
 app.use('/api', async (req, res) => {
   try {
     const qs  = new URLSearchParams(req.query).toString();
     const url = `${KAME_API_URL}${req.path}${qs ? '?' + qs : ''}`;
+
+    const hasBody = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)
+                    && req.body && req.body.length > 0;
+    console.log(`[proxy] ${req.method} ${url} hasBody=${hasBody} bodyLen=${req.body?.length ?? 0}`);
+
     const upstream = await fetch(url, {
       method:  req.method,
       headers: { 'X-API-Key': KAME_API_KEY, 'Content-Type': 'application/json' },
+      body:    hasBody ? req.body : undefined,
     });
     const text = await upstream.text();
     res
