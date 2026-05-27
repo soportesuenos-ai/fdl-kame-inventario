@@ -526,6 +526,7 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
   font-weight: 700;
   flex-shrink: 0;
 }
+.art-qty-badge.qty-zero { background: var(--warn); color: #fff; }
 .art-add-btn {
   background: var(--bg3);
   border: 1.5px dashed var(--border);

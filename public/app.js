@@ -438,7 +438,7 @@ const App = {
             ? `<div class="art-kame-stock">KAME: ${kame}</div>`
             : '<div class="art-kame-stock no-stock">Sin stock registrado</div>'}
         </div>
-        <div class="art-qty-badge">${counted ? item.qty : ''}</div>
+        <div class="art-qty-badge ${counted && item.qty === 0 ? 'qty-zero' : ''}">${counted ? (item.qty === 0 ? '∅' : item.qty) : ''}</div>
         <div class="art-add-btn">+</div>
       </div>`;
   },
