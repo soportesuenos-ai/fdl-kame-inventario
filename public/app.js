@@ -207,14 +207,19 @@ const App = {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById(screen)?.classList.add('active');
 
-    if (screen === 'count')  App.renderArticleList();
-    if (screen === 'review') App.renderReview();
-    if (screen === 'sync')   App.renderSync();
+    if (screen === 'count')       App.renderArticleList();
+    if (screen === 'review')      App.renderReview();
+    if (screen === 'sync')        App.renderSync();
+    if (screen === 'consolidado') App.initConsolidado();
   },
 
   showHome() {
     document.getElementById('topUser').textContent =
       State.currentUser?.nombre?.split(' ')[0] || '—';
+    // Card de consolidación solo visible para admin
+    const isAdmin = State.currentUser?.rol === 'admin';
+    const btnC = document.getElementById('btnConsolidar');
+    if (btnC) btnC.style.display = isAdmin ? 'flex' : 'none';
     App.refreshHomeState();
     App.goTo('home');
   },
@@ -275,6 +280,7 @@ const App = {
       bodega,
       fecha,
       resp,
+      calle: (document.getElementById('sessionCalle')?.value || '').trim(),
       obs: document.getElementById('sessionObs').value.trim(),
       items: {},
       // SKUs extra agregados manualmente (no estaban en stock bodega)
@@ -768,6 +774,262 @@ const App = {
     await DB.delete('sessions', 'current');
     State.currentSession = null;
     App.showHome();
+  },
+
+  // ── SUBMIT SESIÓN AL SERVIDOR ────────────────────────────────────────
+  async submitSesion() {
+    const sess = State.currentSession;
+    if (!sess) { App.toast('No hay sesión activa'); return; }
+    if (!State.isOnline) { App.toast('Sin conexión'); return; }
+    const nItems = Object.keys(sess.items || {}).length;
+    if (nItems === 0) { App.toast('La sesión no tiene conteos'); return; }
+
+    const sesionId = [
+      State.currentUser?.user || 'usr',
+      sess.bodega,
+      sess.fecha,
+    ].join('_').replace(/\s+/g, '_');
+
+    const items = {};
+    for (const [sku, d] of Object.entries(sess.items || {})) {
+      items[sku] = { qty: d.qty, obs: d.obs || null };
+    }
+
+    const btn = document.getElementById('btnSendServer');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Enviando...'; }
+
+    try {
+      const body = {
+        sesion_id: sesionId,
+        usuario:   State.currentUser?.nombre || State.currentUser?.user || 'sistema',
+        bodega:    sess.bodega,
+        calle:     sess.calle || null,
+        fecha:     sess.fecha,
+        items,
+      };
+      const resp = await fetch(`${API_BASE}/inventario/sesiones`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', ...apiHeaders() },
+        body:    JSON.stringify(body),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        App.toast(`✓ Sesión enviada al servidor (${data.items_recibidos} ítems)`);
+        if (btn) { btn.textContent = '✓ Enviado'; }
+      } else {
+        const err = await resp.json().catch(() => ({}));
+        App.toast(`Error al enviar: ${err.detail || resp.status}`);
+        if (btn) { btn.disabled = false; btn.textContent = '📤 Enviar sesión al servidor'; }
+      }
+    } catch(e) {
+      App.toast('Sin conexión al enviar sesión');
+      if (btn) { btn.disabled = false; btn.textContent = '📤 Enviar sesión al servidor'; }
+    }
+  },
+
+  // ── CONSOLIDADO (ADMIN) ───────────────────────────────────────────────
+  _consoData:     [],
+  _consoFilter:   'all',
+  _consoKameStock:{},
+
+  initConsolidado() {
+    document.getElementById('consoStats').style.display    = 'none';
+    document.getElementById('consoFilterBar').style.display= 'none';
+    document.getElementById('consoActions').style.display  = 'none';
+    document.getElementById('consoList').innerHTML = '';
+    App._consoData      = [];
+    App._consoKameStock = {};
+  },
+
+  async cargarConsolidado() {
+    const bodega = document.getElementById('consoBodega').value;
+    if (!bodega) { App.toast('Selecciona una bodega'); return; }
+    if (!State.isOnline) { App.toast('Sin conexión'); return; }
+
+    App.toast('Cargando sesiones...');
+    try {
+      // 1. Consolidado de sesiones en servidor
+      const r1 = await fetch(
+        `${API_BASE}/inventario/sesiones/consolidado?bodega=${encodeURIComponent(bodega)}`,
+        { headers: apiHeaders() }
+      );
+      if (!r1.ok) {
+        const err = await r1.json().catch(() => ({}));
+        App.toast(err.detail || 'Sin sesiones para esta bodega');
+        return;
+      }
+      const conso = await r1.json();
+
+      // 2. Stock KAME de la bodega para comparar diferencias
+      let kameStock = {};
+      try {
+        const r2 = await fetch(
+          `${API_BASE}/inventario/stock/bodega/${encodeURIComponent(bodega)}`,
+          { headers: apiHeaders() }
+        );
+        if (r2.ok) {
+          const sd = await r2.json();
+          for (const item of (sd.items || sd || [])) {
+            const sku = item.sku || item.SKU || item.articulo || item.Articulo;
+            const qty = parseFloat(item.stock ?? item.cantidad ?? item.saldo ?? 0);
+            if (sku) kameStock[sku] = qty;
+          }
+        }
+      } catch(e) {}
+
+      App._consoData      = conso.items || [];
+      App._consoKameStock = kameStock;
+      App._consoFilter    = 'all';
+
+      // Stats
+      const diffs = App._consoData.filter(i => {
+        const kame = kameStock[i.sku] ?? null;
+        return kame === null || i.qty_contada !== kame;
+      }).length;
+
+      document.getElementById('consoNumSesiones').textContent = conso.sesiones_base || 0;
+      document.getElementById('consoNumSkus').textContent     = App._consoData.length;
+      document.getElementById('consoNumDiffs').textContent    = diffs;
+      document.getElementById('consoStats').style.display     = 'grid';
+      document.getElementById('consoFilterBar').style.display = 'flex';
+      document.getElementById('consoActions').style.display   = 'block';
+
+      // Reset chips
+      document.querySelectorAll('#consoFilterBar .chip').forEach((c, i) => {
+        c.classList.toggle('active', i === 0);
+      });
+
+      App.renderConsolidado();
+    } catch(e) {
+      App.toast('Error al cargar sesiones');
+    }
+  },
+
+  renderConsolidado() {
+    const list  = document.getElementById('consoList');
+    const f     = App._consoFilter;
+
+    let items = App._consoData.map(i => {
+      const kame  = i.sku in App._consoKameStock ? App._consoKameStock[i.sku] : null;
+      const delta = kame !== null ? i.qty_contada - kame : null;
+      const art   = State.articles.find(a => a.sku === i.sku);
+      return { ...i, kame, delta, desc: art?.desc || i.sku };
+    });
+
+    if (f === 'diff') items = items.filter(i => i.delta !== 0 && i.delta !== null);
+    if (f === 'ok')   items = items.filter(i => i.delta === 0);
+
+    if (items.length === 0) {
+      list.innerHTML = `<div class="empty-state"><p>Sin ítems para mostrar</p></div>`;
+      return;
+    }
+
+    list.innerHTML = items.map(i => {
+      let badgeClass = 'diff-badge zero', badgeText = '—';
+      if (i.delta !== null) {
+        if (i.delta > 0)      { badgeClass = 'diff-badge positive'; badgeText = `+${i.delta}`; }
+        else if (i.delta < 0) { badgeClass = 'diff-badge';          badgeText = String(i.delta); }
+        else                  { badgeClass = 'diff-badge zero';     badgeText = '='; }
+      }
+      const calleTag = i.calles?.length
+        ? `<span style="font-size:11px;color:var(--text2)"> · ${i.calles.join(', ')}</span>` : '';
+      return `
+        <div class="review-item ${i.delta !== 0 && i.delta !== null ? 'diff' : 'ok-item'}">
+          <div class="review-item-header">
+            <div>
+              <div class="review-desc">${esc(i.desc)}</div>
+              <div class="review-sku">${esc(i.sku)}${calleTag}</div>
+            </div>
+            <span class="${badgeClass}">${badgeText}</span>
+          </div>
+          <div class="review-numbers">
+            <div class="rev-num"><span>Contado</span><strong>${i.qty_contada}</strong></div>
+            <div class="rev-num"><span>KAME</span><strong style="color:var(--info)">${i.kame !== null ? i.kame : '—'}</strong></div>
+            <div class="rev-num"><span>Diferencia</span><strong style="color:${i.delta > 0 ? 'var(--ok)' : i.delta < 0 ? 'var(--warn)' : 'var(--text2)'}">${i.delta !== null ? i.delta : '—'}</strong></div>
+          </div>
+          ${i.obs ? `<div style="font-size:12px;color:var(--text2);margin-top:6px">📝 ${esc(i.obs)}</div>` : ''}
+        </div>`;
+    }).join('');
+  },
+
+  filterConsolidado(f, btn) {
+    App._consoFilter = f;
+    document.querySelectorAll('#consoFilterBar .chip').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    App.renderConsolidado();
+  },
+
+  async generarMovimientos() {
+    const bodega = document.getElementById('consoBodega').value;
+    if (!bodega) { App.toast('Selecciona una bodega'); return; }
+
+    const diffs = App._consoData.filter(i => {
+      const kame  = i.sku in App._consoKameStock ? App._consoKameStock[i.sku] : null;
+      const delta = kame !== null ? i.qty_contada - kame : null;
+      return delta !== null && delta !== 0;
+    });
+
+    if (diffs.length === 0) { App.toast('Sin diferencias para procesar'); return; }
+    if (!confirm(`¿Generar ${diffs.length} movimiento(s) en KAME para ${bodega}?`)) return;
+
+    const primaryBtn = document.querySelector('#consoActions .btn-primary');
+    if (primaryBtn) { primaryBtn.disabled = true; primaryBtn.textContent = `⏳ 0/${diffs.length}...`; }
+
+    const fecha = new Date().toISOString().slice(0, 10);
+    let ok = 0, errors = 0;
+
+    for (const item of diffs) {
+      const kame  = App._consoKameStock[item.sku] ?? 0;
+      const delta = item.qty_contada - kame;
+      const tipo  = delta > 0 ? 'ENTRADA' : 'SALIDA';
+      try {
+        const body = {
+          usuario:          State.currentUser?.user || 'admin',
+          tipoDocumento:    tipo,
+          fecha,
+          motivoMovimiento: 'Ajuste inventario físico consolidado',
+          bodegaEntrada:    delta > 0 ? bodega : '',
+          bodegaSalida:     delta < 0 ? bodega : '',
+          comentario:       `Consolidado multi-usuario ${fecha}`,
+          items:            [{ sku: item.sku, cantidad: Math.abs(delta) }],
+        };
+        const r = await fetch(`${API_BASE}/inventario/movimiento`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', ...apiHeaders() },
+          body:    JSON.stringify(body),
+        });
+        if (r.ok) ok++; else errors++;
+      } catch(e) { errors++; }
+      if (primaryBtn) primaryBtn.textContent = `⏳ ${ok + errors}/${diffs.length}...`;
+    }
+
+    if (primaryBtn) {
+      primaryBtn.disabled = false;
+      primaryBtn.textContent = errors === 0
+        ? `✓ ${ok} movimientos generados`
+        : `⚠️ ${ok} OK, ${errors} errores`;
+    }
+    App.toast(errors === 0
+      ? `✓ ${ok} movimientos registrados en KAME`
+      : `${errors} errores — reintenta los fallidos`);
+  },
+
+  async clearSesiones() {
+    const bodega = document.getElementById('consoBodega').value;
+    if (!bodega) { App.toast('Selecciona una bodega'); return; }
+    if (!confirm(`¿Eliminar todas las sesiones del servidor para ${bodega}?`)) return;
+    try {
+      const r = await fetch(
+        `${API_BASE}/inventario/sesiones?bodega=${encodeURIComponent(bodega)}`,
+        { method: 'DELETE', headers: apiHeaders() }
+      );
+      if (r.ok) {
+        App.toast('Sesiones eliminadas del servidor ✓');
+        App.initConsolidado();
+      } else {
+        App.toast('Error al eliminar sesiones');
+      }
+    } catch(e) { App.toast('Sin conexión'); }
   },
 
   // ── ONLINE STATUS ─────────────────────────────────────────────────────
