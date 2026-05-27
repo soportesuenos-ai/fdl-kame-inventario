@@ -818,7 +818,11 @@ const App = {
         if (btn) { btn.textContent = '✓ Enviado'; }
       } else {
         const err = await resp.json().catch(() => ({}));
-        App.toast(`Error al enviar: ${err.detail || resp.status}`);
+        const detail = typeof err.detail === 'string'
+          ? err.detail
+          : JSON.stringify(err.detail || err).slice(0, 200);
+        console.error('submitSesion error', resp.status, err);
+        App.toast(`Error ${resp.status}: ${detail}`, 5000);
         if (btn) { btn.disabled = false; btn.textContent = '📤 Enviar sesión al servidor'; }
       }
     } catch(e) {
