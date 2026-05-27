@@ -211,6 +211,11 @@ const App = {
     if (screen === 'review')      App.renderReview();
     if (screen === 'sync')        App.renderSync();
     if (screen === 'consolidado') App.initConsolidado();
+
+    // Botón flotante home: visible en pantallas de trabajo, oculto en home/login/splash
+    const noHome = ['home', 'login', 'splash', 'newSession'];
+    const fab = document.getElementById('btnFloatHome');
+    if (fab) fab.style.display = noHome.includes(screen) ? 'none' : 'flex';
   },
 
   showHome() {
@@ -438,7 +443,7 @@ const App = {
             ? `<div class="art-kame-stock">KAME: ${kame}</div>`
             : '<div class="art-kame-stock no-stock">Sin stock registrado</div>'}
         </div>
-        <div class="art-qty-badge">${counted ? item.qty : ''}</div>
+        <div class="art-qty-badge ${counted && item.qty === 0 ? 'qty-zero' : ''}">${counted ? (item.qty === 0 ? '∅' : item.qty) : ''}</div>
         <div class="art-add-btn">+</div>
       </div>`;
   },
@@ -818,7 +823,11 @@ const App = {
         if (btn) { btn.textContent = '✓ Enviado'; }
       } else {
         const err = await resp.json().catch(() => ({}));
-        App.toast(`Error al enviar: ${err.detail || resp.status}`);
+        const detail = typeof err.detail === 'string'
+          ? err.detail
+          : JSON.stringify(err.detail || err).slice(0, 200);
+        console.error('submitSesion error', resp.status, err);
+        App.toast(`Error ${resp.status}: ${detail}`, 5000);
         if (btn) { btn.disabled = false; btn.textContent = '📤 Enviar sesión al servidor'; }
       }
     } catch(e) {
@@ -880,6 +889,9 @@ const App = {
       App._consoData      = conso.items || [];
       App._consoKameStock = kameStock;
       App._consoFilter    = 'all';
+      App._consoStockTs   = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+      const tsEl = document.getElementById('consoStockTs');
+      if (tsEl) tsEl.textContent = App._consoStockTs;
 
       // Stats
       const diffs = App._consoData.filter(i => {
@@ -1030,6 +1042,42 @@ const App = {
         App.toast('Error al eliminar sesiones');
       }
     } catch(e) { App.toast('Sin conexión'); }
+  },
+
+  async refrescarStockConsolidado() {
+    const bodega = document.getElementById('consoBodega').value;
+    if (!bodega) { App.toast('Selecciona una bodega primero'); return; }
+    if (!State.isOnline) { App.toast('Sin conexión'); return; }
+    App.toast('Actualizando stock KAME...');
+    try {
+      const r = await fetch(
+        `${API_BASE}/inventario/stock/bodega/${encodeURIComponent(bodega)}`,
+        { headers: apiHeaders() }
+      );
+      if (!r.ok) { App.toast('Error al obtener stock'); return; }
+      const sd = await r.json();
+      const kameStock = {};
+      for (const item of (sd.items || sd || [])) {
+        const sku = item.sku || item.SKU || item.articulo || item.Articulo;
+        const qty = parseFloat(item.stock ?? item.cantidad ?? item.saldo ?? 0);
+        if (sku) kameStock[sku] = qty;
+      }
+      App._consoKameStock = kameStock;
+      App._consoStockTs   = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+      const tsEl = document.getElementById('consoStockTs');
+      if (tsEl) tsEl.textContent = App._consoStockTs;
+
+      // Recalcular stats de diferencias
+      const diffs = App._consoData.filter(i => {
+        const kame = kameStock[i.sku] ?? null;
+        return kame === null || i.qty_contada !== kame;
+      }).length;
+      const diffsEl = document.getElementById('consoNumDiffs');
+      if (diffsEl) diffsEl.textContent = diffs;
+
+      App.renderConsolidado();
+      App.toast(`✓ Stock actualizado a las ${App._consoStockTs}`);
+    } catch(e) { App.toast('Error al refrescar stock'); }
   },
 
   // ── ONLINE STATUS ─────────────────────────────────────────────────────
