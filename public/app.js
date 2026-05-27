@@ -3,10 +3,11 @@
    Offline-first PWA para toma de inventario
 ══════════════════════════════════════════════════════════════════════════ */
 
-const API_BASE    = window.KAME_API_URL  || 'https://fdl-kame-api.onrender.com';
-const API_KEY     = window.KAME_API_KEY  || '';   // Setear en index.html: <script>window.KAME_API_KEY='...'</script>
+// Proxy server-side en /api — evita CORS y mantiene la API key segura en el servidor
+const API_BASE    = window.KAME_API_URL  || '/api';
+const API_KEY     = window.KAME_API_KEY  || '';
 
-// Helper: headers con API key para todos los fetch a la API
+// Helper: headers con API key (no necesario con proxy, pero por compatibilidad)
 function apiHeaders() {
   return API_KEY ? { 'X-API-Key': API_KEY } : {};
 }
