@@ -156,7 +156,7 @@ const App = {
     if (State.isOnline) {
       try {
         statusEl.textContent = 'Descargando catálogo KAME...';
-        const resp = await fetch(`${API_BASE}/maestro/articulos/todos`, { headers: apiHeaders() });
+        const resp = await fetch(`${API_BASE}/maestro/articulos/slim`, { headers: apiHeaders() });
         if (resp.ok) {
           const data = await resp.json();
           State.articles = (data.items || data || []).map(normalize);
