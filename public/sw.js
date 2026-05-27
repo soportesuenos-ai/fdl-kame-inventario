@@ -1,5 +1,5 @@
-const CACHE  = 'kame-inv-v9';
-const ASSETS = ['/', '/index.html', '/app.js', '/style.css', '/articulos.js', '/manifest.json'];
+const CACHE  = 'kame-inv-v10';
+const ASSETS = ['/', '/index.html', '/config.js', '/app.js', '/style.css', '/articulos.js', '/manifest.json'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
