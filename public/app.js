@@ -740,7 +740,7 @@ const App = {
 
       const diff = item.qty - kame;
       const tipo  = diff > 0 ? 'ENTRADA' : 'SALIDA';
-      const motivo = diff > 0 ? 'Entrada por produccion (E)' : 'Merma';
+      const motivo = diff > 0 ? 'Entrada por producción' : 'Merma';
 
       try {
         const art     = State.articles.find(a => a.sku === sku);
@@ -1041,7 +1041,7 @@ const App = {
           usuario:          State.currentUser?.kameUser || KAME_USUARIO,
           tipoDocumento:    tipo,
           fecha,
-          motivoMovimiento: tipo === 'ENTRADA' ? 'Entrada por produccion (E)' : 'Merma',
+          motivoMovimiento: tipo === 'ENTRADA' ? 'Entrada por producción' : 'Merma',
           rutFicha:         RUT_FICHA,
           bodegaEntrada:    delta > 0 ? bodega : '',
           bodegaSalida:     delta < 0 ? bodega : '',
@@ -1186,7 +1186,7 @@ const App = {
           usuario:          KAME_USUARIO,
           tipoDocumento:    tipo,
           fecha:            sess.fecha || new Date().toISOString().slice(0, 10),
-          motivoMovimiento: tipo === 'ENTRADA' ? 'Entrada por produccion (E)' : 'Merma',
+          motivoMovimiento: tipo === 'ENTRADA' ? 'Entrada por producción' : 'Merma',
           rutFicha:         RUT_FICHA,
           bodegaEntrada:    diff > 0 ? sess.bodega : '',
           bodegaSalida:     diff < 0 ? sess.bodega : '',
