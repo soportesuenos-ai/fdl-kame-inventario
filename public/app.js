@@ -70,7 +70,7 @@ let db;
 const DB = {
   async open() {
     return new Promise((res, rej) => {
-      const req = indexedDB.open('KameInventario', 2);
+      const req = indexedDB.open('KameInventario', 3);
       req.onupgradeneeded = e => {
         const d = e.target.result;
         if (!d.objectStoreNames.contains('sessions'))
@@ -79,6 +79,8 @@ const DB = {
           d.createObjectStore('articles', { keyPath: 'sku' });
         if (!d.objectStoreNames.contains('pending'))
           d.createObjectStore('pending', { keyPath: 'id', autoIncrement: true });
+        if (!d.objectStoreNames.contains('history'))
+          d.createObjectStore('history', { keyPath: 'id', autoIncrement: true });
       };
       req.onsuccess = e => { db = e.target.result; res(db); };
       req.onerror = () => rej(req.error);
@@ -285,6 +287,23 @@ const App = {
         banner.style.display = 'none';
       }
     });
+
+    // Botón historial solo para admin
+    let histBtn = document.getElementById('btnHistorial');
+    if (isAdmin) {
+      if (!histBtn) {
+        histBtn = document.createElement('button');
+        histBtn.id = 'btnHistorial';
+        histBtn.className = 'action-card';
+        histBtn.innerHTML = '<span style="font-size:24px">📋</span><span>Historial de inventarios</span>';
+        histBtn.onclick = () => App.showHistory();
+        histBtn.style.display = 'flex';
+        document.getElementById('btnConsolidar').parentNode.appendChild(histBtn);
+      }
+      histBtn.style.display = 'flex';
+    } else if (histBtn) {
+      histBtn.style.display = 'none';
+    }
   },
 
   // ── SESSION ───────────────────────────────────────────────────────────
@@ -705,6 +724,10 @@ const App = {
   },
 
   async doSync() {
+    if (State.currentUser?.rol !== 'admin') {
+      App.toast('Solo el administrador puede enviar movimientos a KAME');
+      return;
+    }
     const sess = State.currentSession;
     if (!sess) return;
 
@@ -769,7 +792,10 @@ const App = {
         });
 
         if (resp.ok) {
-          addLog(`✓ ${sku}: ${tipo} ${Math.abs(diff)} unidades`);
+          const rj = await resp.json().catch(() => ({}));
+          const folio = rj?.Folio ?? rj?.folio ?? '';
+          addLog(`✓ ${sku}: ${tipo} ${Math.abs(diff)} unidades${folio ? ' — Folio ' + folio : ''}`);
+          itemDet._folio = folio;
           ok++;
         } else {
           addLog(`✗ ${sku}: Error ${resp.status}`, true);
@@ -788,6 +814,21 @@ const App = {
       document.getElementById('syncMsg').textContent   = '¡Sincronizado!';
       document.getElementById('syncDetail').textContent = `${ok} movimientos registrados en KAME`;
       App.toast('Inventario subido a KAME ✓');
+      // Guardar historial antes de borrar
+      await DB.save('history', {
+        ts:          Date.now(),
+        fechaStr:    new Date().toLocaleString('es-CL'),
+        tipo:        'sesion',
+        user:        State.currentUser?.nombre || '',
+        bodega:      sess.bodega || '',
+        fechaConteo: sess.fecha  || '',
+        totalOk:     ok,
+        totalItems:  Object.keys(sess.items || {}).length,
+        items:       Object.entries(sess.items || {}).map(([sku, it]) => ({
+          sku, qty: it.qty,
+          kame: State.kameStock[sku] ?? null,
+        })),
+      });
       // Limpiar sesión
       await DB.delete('sessions', 'current');
       State.currentSession = null;
@@ -1007,6 +1048,10 @@ const App = {
   },
 
   async generarMovimientos() {
+    if (State.currentUser?.rol !== 'admin') {
+      App.toast('Solo el administrador puede generar movimientos en KAME');
+      return;
+    }
     const bodega = document.getElementById('consoBodega').value;
     if (!bodega) { App.toast('Selecciona una bodega'); return; }
 
@@ -1053,10 +1098,32 @@ const App = {
           headers: { 'Content-Type': 'application/json', ...apiHeaders() },
           body:    JSON.stringify(body),
         });
-        if (r.ok) ok++; else errors++;
+        if (r.ok) {
+          const rj = await r.json().catch(() => ({}));
+          itemDet._folio = rj?.Folio ?? rj?.folio ?? '';
+          ok++;
+        } else errors++;
       } catch(e) { errors++; }
       if (primaryBtn) primaryBtn.textContent = `⏳ ${ok + errors}/${diffs.length}...`;
     }
+
+    // Guardar historial del consolidado
+    await DB.save('history', {
+      ts:          Date.now(),
+      fechaStr:    new Date().toLocaleString('es-CL'),
+      tipo:        'consolidado',
+      user:        State.currentUser?.nombre || '',
+      bodega,
+      fechaConteo: fecha,
+      totalOk:     ok,
+      totalErrors: errors,
+      totalItems:  diffs.length,
+      items:       diffs.map(i => ({
+        sku: i.sku, qty_contada: i.qty_contada,
+        kame: App._consoKameStock[i.sku] ?? null,
+        folio: i._folio ?? '',
+      })),
+    });
 
     if (primaryBtn) {
       primaryBtn.disabled = false;
@@ -1222,6 +1289,45 @@ const App = {
 
   qrNotReady() {
     App.toast('Escáner QR próximamente — buscá el artículo por nombre o SKU');
+  },
+
+  // ── HISTORIAL ────────────────────────────────────────────────────────────
+  async showHistory() {
+    const records = await DB.getAll('history');
+    records.sort((a, b) => b.ts - a.ts);
+
+    let modal = document.getElementById('historyModal');
+    if (modal) modal.remove();
+    modal = document.createElement('div');
+    modal.id = 'historyModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9998;display:flex;align-items:flex-end;';
+    document.body.appendChild(modal);
+
+    const rows = records.length === 0
+      ? '<p style="padding:16px;color:#888;text-align:center">Sin historial aún</p>'
+      : records.map(r => {
+          const folios = (r.items || []).filter(i => i.folio).map(i => i.folio).join(', ');
+          return `
+          <div style="padding:12px 16px;border-bottom:1px solid #eee">
+            <div style="font-weight:600;font-size:14px">${r.fechaStr} — ${r.tipo === 'consolidado' ? '🗂 Consolidado' : '📋 Sesión'}</div>
+            <div style="font-size:13px;color:#555;margin-top:2px">
+              Bodega: <b>${r.bodega}</b> &nbsp;|&nbsp; Conteo: <b>${r.fechaConteo}</b>
+            </div>
+            <div style="font-size:13px;color:#555">
+              Usuario: ${r.user} &nbsp;|&nbsp; ${r.totalOk} mov. OK &nbsp;|&nbsp; ${r.totalItems} ítems
+            </div>
+            ${folios ? `<div style="font-size:12px;color:#888;margin-top:2px">Folios: ${folios}</div>` : ''}
+          </div>`;
+        }).join('');
+
+    modal.innerHTML = `
+      <div style="background:#fff;width:100%;max-height:80vh;border-radius:16px 16px 0 0;overflow:auto">
+        <div style="padding:16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eee;position:sticky;top:0;background:#fff">
+          <b style="font-size:16px">📋 Historial de inventarios</b>
+          <button onclick="document.getElementById('historyModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">✕</button>
+        </div>
+        ${rows}
+      </div>`;
   },
 
   toast(msg, duration = 2500) {
