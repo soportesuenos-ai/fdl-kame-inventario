@@ -24,15 +24,26 @@ const KAME_USUARIO   = 'alex@inmopatagonia.cl';   // usuario válido en KAME ERP
 const RUT_FICHA      = '13.319.963-2';            // RUT requerido por KAME en movimientos
 const UNIDAD_NEGOCIO = 'Planta Aserradero';        // Unidad de negocio configurada en KAME
 
-// Calcula precio costo por unidad: factor (pulg) × costo/pulg según calidad
-function calcPrecioCosto(factor, desc) {
+// Calcula precio costo: recalcula factor desde descripción (evita factores incorrectos en KAME)
+// Factor = E × A × L / divisor  (blandas=32, nativas=36.6)
+// Precio = factor × costo/pulg según calidad (1ª=2300, 2ª=1000, 3ª=500)
+function calcPrecioCosto(desc) {
   const d = (desc || '').toUpperCase();
+  // Extraer dimensiones EspesorxAnchoxLargo del nombre (ej. "1X14X6.00")
+  const m = d.match(/(\d+(?:[.,]\d+)?)[X×](\d+(?:[.,]\d+)?)[X×](\d+(?:[.,]\d+)?)/);
+  if (!m) return 0;
+  const e = parseFloat(m[1].replace(',', '.'));
+  const a = parseFloat(m[2].replace(',', '.'));
+  const l = parseFloat(m[3].replace(',', '.'));
+  const NATIVAS = ['ROBLE', 'NATIVO', 'LAUREL', 'LINGUE', 'AROMO'];
+  const divisor = NATIVAS.some(n => d.includes(n)) ? 36.6 : 32.0;
+  const factor  = (e * a * l) / divisor;
   let costoPulg;
-  if      (d.includes('1ª') || d.includes('1A ') || d.includes(' 1A')) costoPulg = 2300;
-  else if (d.includes('2ª') || d.includes('2A ') || d.includes(' 2A')) costoPulg = 1000;
-  else if (d.includes('3ª') || d.includes('3A ') || d.includes(' 3A')) costoPulg = 500;
-  else                                                                   costoPulg = 1000; // default 2ª
-  return Math.round((factor || 0) * costoPulg);
+  if      (d.includes('1ª')) costoPulg = 2300;
+  else if (d.includes('2ª')) costoPulg = 1000;
+  else if (d.includes('3ª')) costoPulg = 500;
+  else                       costoPulg = 1000; // default 2ª
+  return Math.round(factor * costoPulg);
 }
 const USERS = {
   'admin':   { pin: '1234', nombre: 'Administrador',  rol: 'admin',  kameUser: KAME_USUARIO },
@@ -729,11 +740,11 @@ const App = {
 
       const diff = item.qty - kame;
       const tipo  = diff > 0 ? 'ENTRADA' : 'SALIDA';
-      const motivo = diff > 0 ? 'Entrada por producción' : 'Merma';
+      const motivo = diff > 0 ? 'Entrada por produccion (E)' : 'Merma';
 
       try {
         const art     = State.articles.find(a => a.sku === sku);
-        const precio  = calcPrecioCosto(art?.factor || 0, art?.desc || '');
+        const precio  = calcPrecioCosto(art?.desc || '');
         const cant    = Math.abs(diff);
         const itemDet = {
           sku, cantidad: cant, unidadNegocio: UNIDAD_NEGOCIO,
@@ -1020,7 +1031,7 @@ const App = {
       const tipo  = delta > 0 ? 'ENTRADA' : 'SALIDA';
       try {
         const art     = State.articles.find(a => a.sku === item.sku);
-        const precio  = calcPrecioCosto(art?.factor || 0, art?.desc || '');
+        const precio  = calcPrecioCosto(art?.desc || '');
         const cant    = Math.abs(delta);
         const itemDet = {
           sku: item.sku, cantidad: cant, unidadNegocio: UNIDAD_NEGOCIO,
@@ -1030,7 +1041,7 @@ const App = {
           usuario:          State.currentUser?.kameUser || KAME_USUARIO,
           tipoDocumento:    tipo,
           fecha,
-          motivoMovimiento: tipo === 'ENTRADA' ? 'Entrada por producción' : 'Merma',
+          motivoMovimiento: tipo === 'ENTRADA' ? 'Entrada por produccion (E)' : 'Merma',
           rutFicha:         RUT_FICHA,
           bodegaEntrada:    delta > 0 ? bodega : '',
           bodegaSalida:     delta < 0 ? bodega : '',
@@ -1165,7 +1176,7 @@ const App = {
 
         const tipo    = diff > 0 ? 'ENTRADA' : 'SALIDA';
         const art     = State.articles.find(a => a.sku === sku);
-        const precio  = calcPrecioCosto(art?.factor || 0, art?.desc || '');
+        const precio  = calcPrecioCosto(art?.desc || '');
         const cant    = Math.abs(diff);
         const itemDet = {
           sku, cantidad: cant, unidadNegocio: UNIDAD_NEGOCIO,
@@ -1175,7 +1186,7 @@ const App = {
           usuario:          KAME_USUARIO,
           tipoDocumento:    tipo,
           fecha:            sess.fecha || new Date().toISOString().slice(0, 10),
-          motivoMovimiento: tipo === 'ENTRADA' ? 'Entrada por producción' : 'Merma',
+          motivoMovimiento: tipo === 'ENTRADA' ? 'Entrada por produccion (E)' : 'Merma',
           rutFicha:         RUT_FICHA,
           bodegaEntrada:    diff > 0 ? sess.bodega : '',
           bodegaSalida:     diff < 0 ? sess.bodega : '',
