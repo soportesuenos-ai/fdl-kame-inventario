@@ -20,7 +20,20 @@ function esc(str) {
 // ─── USUARIOS AUTORIZADOS ─────────────────────────────────────────────────
 // Agregar/quitar usuarios aquí. PIN hasheado con btoa para ejemplo simple.
 // En producción usar bcrypt en backend.
-const KAME_USUARIO = 'alex@inmopatagonia.cl';   // usuario válido en KAME ERP
+const KAME_USUARIO   = 'alex@inmopatagonia.cl';   // usuario válido en KAME ERP
+const RUT_FICHA      = '13.319.963-2';            // RUT requerido por KAME en movimientos
+const UNIDAD_NEGOCIO = 'Planta Aserradero';        // Unidad de negocio configurada en KAME
+
+// Calcula precio costo por unidad: factor (pulg) × costo/pulg según calidad
+function calcPrecioCosto(factor, desc) {
+  const d = (desc || '').toUpperCase();
+  let costoPulg;
+  if      (d.includes('1ª') || d.includes('1A ') || d.includes(' 1A')) costoPulg = 2300;
+  else if (d.includes('2ª') || d.includes('2A ') || d.includes(' 2A')) costoPulg = 1000;
+  else if (d.includes('3ª') || d.includes('3A ') || d.includes(' 3A')) costoPulg = 500;
+  else                                                                   costoPulg = 1000; // default 2ª
+  return Math.round((factor || 0) * costoPulg);
+}
 const USERS = {
   'admin':   { pin: '1234', nombre: 'Administrador',  rol: 'admin',  kameUser: KAME_USUARIO },
   'bodega1': { pin: '2580', nombre: 'Bodeguero 1',    rol: 'bodega', kameUser: KAME_USUARIO },
@@ -150,6 +163,7 @@ const App = {
       sku:     (a.sku || a.SKU || '').trim(),
       desc:    (a.desc || a.descripcion || a['Descripcion'] || a['Descripción'] || '').trim(),
       familia: (a.familia || a['Familia'] || '').trim(),
+      factor:  parseFloat(a.factor || a.FactorUnidadEquivalente || a.factorUnidadEquivalente || 0),
     });
 
     // Con conexión: siempre descarga el catálogo fresco desde KAME y actualiza caché.
@@ -715,18 +729,26 @@ const App = {
 
       const diff = item.qty - kame;
       const tipo  = diff > 0 ? 'ENTRADA' : 'SALIDA';
-      const motivo = diff > 0 ? 'Ajuste por inventario físico (E)' : 'Ajuste por inventario físico (S)';
+      const motivo = diff > 0 ? 'Entrada por producción' : 'Merma';
 
       try {
+        const art     = State.articles.find(a => a.sku === sku);
+        const precio  = calcPrecioCosto(art?.factor || 0, art?.desc || '');
+        const cant    = Math.abs(diff);
+        const itemDet = {
+          sku, cantidad: cant, unidadNegocio: UNIDAD_NEGOCIO,
+          ...(tipo === 'ENTRADA' ? { precioUnitario: precio, totalLinea: Math.round(cant * precio) } : {}),
+        };
         const body = {
-          usuario: State.currentUser?.kameUser || KAME_USUARIO,
-          tipoDocumento: tipo,
-          fecha: sess.fecha,
+          usuario:          State.currentUser?.kameUser || KAME_USUARIO,
+          tipoDocumento:    tipo,
+          fecha:            sess.fecha,
           motivoMovimiento: motivo,
-          bodegaEntrada: diff > 0 ? sess.bodega : '',
-          bodegaSalida:  diff < 0 ? sess.bodega : '',
-          comentario: `Toma de inventario ${sess.fecha} - ${sess.resp}`,
-          items: [{ sku, cantidad: Math.abs(diff) }]
+          rutFicha:         RUT_FICHA,
+          bodegaEntrada:    diff > 0 ? sess.bodega : '',
+          bodegaSalida:     diff < 0 ? sess.bodega : '',
+          comentario:       `Toma de inventario ${sess.fecha} - ${sess.resp}`,
+          items:            [itemDet],
         };
 
         const resp = await fetch(`${API_BASE}/inventario/movimiento`, {
@@ -997,15 +1019,23 @@ const App = {
       const delta = item.qty_contada - kame;
       const tipo  = delta > 0 ? 'ENTRADA' : 'SALIDA';
       try {
+        const art     = State.articles.find(a => a.sku === item.sku);
+        const precio  = calcPrecioCosto(art?.factor || 0, art?.desc || '');
+        const cant    = Math.abs(delta);
+        const itemDet = {
+          sku: item.sku, cantidad: cant, unidadNegocio: UNIDAD_NEGOCIO,
+          ...(tipo === 'ENTRADA' ? { precioUnitario: precio, totalLinea: Math.round(cant * precio) } : {}),
+        };
         const body = {
           usuario:          State.currentUser?.kameUser || KAME_USUARIO,
           tipoDocumento:    tipo,
           fecha,
-          motivoMovimiento: 'Ajuste inventario físico consolidado',
+          motivoMovimiento: tipo === 'ENTRADA' ? 'Entrada por producción' : 'Merma',
+          rutFicha:         RUT_FICHA,
           bodegaEntrada:    delta > 0 ? bodega : '',
           bodegaSalida:     delta < 0 ? bodega : '',
           comentario:       `Consolidado multi-usuario ${fecha}`,
-          items:            [{ sku: item.sku, cantidad: Math.abs(delta) }],
+          items:            [itemDet],
         };
         const r = await fetch(`${API_BASE}/inventario/movimiento`, {
           method:  'POST',
@@ -1133,16 +1163,24 @@ const App = {
         const diff   = conteo - stock;
         if (diff === 0) { sessionOk++; continue; }
 
-        const tipo = diff > 0 ? 'ENTRADA' : 'SALIDA';
+        const tipo    = diff > 0 ? 'ENTRADA' : 'SALIDA';
+        const art     = State.articles.find(a => a.sku === sku);
+        const precio  = calcPrecioCosto(art?.factor || 0, art?.desc || '');
+        const cant    = Math.abs(diff);
+        const itemDet = {
+          sku, cantidad: cant, unidadNegocio: UNIDAD_NEGOCIO,
+          ...(tipo === 'ENTRADA' ? { precioUnitario: precio, totalLinea: Math.round(cant * precio) } : {}),
+        };
         const body = {
           usuario:          KAME_USUARIO,
           tipoDocumento:    tipo,
           fecha:            sess.fecha || new Date().toISOString().slice(0, 10),
-          motivoMovimiento: `Toma de inventario ${sess.fecha || ''} - ${sess.resp || ''}`,
+          motivoMovimiento: tipo === 'ENTRADA' ? 'Entrada por producción' : 'Merma',
+          rutFicha:         RUT_FICHA,
           bodegaEntrada:    diff > 0 ? sess.bodega : '',
           bodegaSalida:     diff < 0 ? sess.bodega : '',
-          comentario:       `Sync pendiente`,
-          items:            [{ sku, cantidad: Math.abs(diff) }],
+          comentario:       `Sync pendiente - ${sess.fecha || ''} - ${sess.resp || ''}`,
+          items:            [itemDet],
         };
 
         try {
