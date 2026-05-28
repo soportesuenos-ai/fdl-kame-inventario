@@ -20,11 +20,12 @@ function esc(str) {
 // ─── USUARIOS AUTORIZADOS ─────────────────────────────────────────────────
 // Agregar/quitar usuarios aquí. PIN hasheado con btoa para ejemplo simple.
 // En producción usar bcrypt en backend.
+const KAME_USUARIO = 'alex@inmopatagonia.cl';   // usuario válido en KAME ERP
 const USERS = {
-  'admin':   { pin: '1234', nombre: 'Administrador',  rol: 'admin' },
-  'bodega1': { pin: '2580', nombre: 'Bodeguero 1',    rol: 'bodega' },
-  'bodega2': { pin: '1470', nombre: 'Bodeguero 2',    rol: 'bodega' },
-  'jefe':    { pin: '9999', nombre: 'Jefe de Patio',  rol: 'jefe' },
+  'admin':   { pin: '1234', nombre: 'Administrador',  rol: 'admin',  kameUser: KAME_USUARIO },
+  'bodega1': { pin: '2580', nombre: 'Bodeguero 1',    rol: 'bodega', kameUser: KAME_USUARIO },
+  'bodega2': { pin: '1470', nombre: 'Bodeguero 2',    rol: 'bodega', kameUser: KAME_USUARIO },
+  'jefe':    { pin: '9999', nombre: 'Jefe de Patio',  rol: 'jefe',   kameUser: KAME_USUARIO },
 };
 
 // ─── STATE ────────────────────────────────────────────────────────────────
@@ -718,7 +719,7 @@ const App = {
 
       try {
         const body = {
-          usuario: State.currentUser?.user || 'sistema',
+          usuario: State.currentUser?.kameUser || KAME_USUARIO,
           tipoDocumento: tipo,
           fecha: sess.fecha,
           motivoMovimiento: motivo,
@@ -997,7 +998,7 @@ const App = {
       const tipo  = delta > 0 ? 'ENTRADA' : 'SALIDA';
       try {
         const body = {
-          usuario:          State.currentUser?.user || 'admin',
+          usuario:          State.currentUser?.kameUser || KAME_USUARIO,
           tipoDocumento:    tipo,
           fecha,
           motivoMovimiento: 'Ajuste inventario físico consolidado',
@@ -1134,7 +1135,7 @@ const App = {
 
         const tipo = diff > 0 ? 'ENTRADA' : 'SALIDA';
         const body = {
-          usuario:          pendingEntry.user || 'sistema',
+          usuario:          KAME_USUARIO,
           tipoDocumento:    tipo,
           fecha:            sess.fecha || new Date().toISOString().slice(0, 10),
           motivoMovimiento: `Toma de inventario ${sess.fecha || ''} - ${sess.resp || ''}`,
