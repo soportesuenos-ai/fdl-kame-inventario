@@ -1581,93 +1581,57 @@ const App = {
   },
 
   async ctCargarStock() {
-    try {
-      const bodega = encodeURIComponent('CANCHA DE TROZOS');
-      const resp   = await fetch(API_BASE + '/inventario/stock/bodega/' + bodega, { headers: apiHeaders() });
-      if (!resp.ok) throw new Error(resp.status);
-      const data  = await resp.json();
-      const items = data.items || data || [];
+    // Usa State.kameStock + State.articles (ya cargados en sesión CANCHA DE TROZOS)
+    // Sin llamada extra a la API — más rápido y funciona offline
+    const reR = /CC\s+(\w+)\s+([\d.]+)\s*MTS.*?(\d+)\s*CM/i;
+    const reM = /METRO\s+RUMA/i;
 
-      // Regex para extraer especie, largo y diámetro desde la descripción
-      // Ej: "ROLLIZO INDUSTRIAL CC INSIGNE 2.44 MTS 28 CM DIAMETRO"
-      const reRollizo = /CC\s+(\w+)\s+([\d.]+)\s*MTS.*?(\d+)\s*CM/i;
-      const reMR      = /METRO\s+RUMA/i;
-
+    const buildGrupos = function(kameStock, articles) {
+      const artMap = {};
+      (articles || []).forEach(function(a) { if (a.sku) artMap[a.sku] = a; });
       const grupos = {};
-
-      items.forEach(function(it) {
-        const sku  = it.SKU || it.sku || it.articulo || it.Articulo || '';
+      Object.keys(kameStock || {}).forEach(function(sku) {
         if (!sku.startsWith('TRO')) return;
-        const qty  = parseFloat(it.StockActual || it.stockActual || it.stock || it.saldo || 0);
+        const qty = parseFloat(kameStock[sku] || 0);
         if (qty <= 0) return;
-        const desc = it.Descripcion || it.descripcion || '';
-
-        if (reMR.test(desc)) {
-          // METRO RUMA: factor hardcodeado = 1.5 (confirmado del maestro)
-          const mLargo = desc.match(/([\d.]+)\s*MTS/i);
-          if (mLargo) {
-            const key = 'METRO_RUMA|' + parseFloat(mLargo[1]);
-            if (!grupos[key]) grupos[key] = 0;
-            grupos[key] += qty * 1.5;
-          }
+        const art  = artMap[sku] || {};
+        const desc = art.desc || '';
+        if (!desc) return;
+        if (reM.test(desc)) {
+          const mL = desc.match(/([\d.]+)\s*MTS/i);
+          if (mL) { const k = 'METRO_RUMA|'+parseFloat(mL[1]); grupos[k]=(grupos[k]||0)+qty*1.5; }
           return;
         }
-
-        const m = reRollizo.exec(desc);
+        const m = reR.exec(desc);
         if (!m) return;
-        const especie = m[1].toUpperCase();
-        const largo   = parseFloat(m[2]);
-        const diam_m  = parseInt(m[3]) / 100;   // cm → metros
-        // Factor KAME = d_m² × L_m (fórmula cuadrada, verificada con maestro)
-        const factor  = diam_m * diam_m * largo;
-        const key     = especie + '|' + largo;
-        if (!grupos[key]) grupos[key] = 0;
-        grupos[key] += qty * factor;
+        const diam_m = parseInt(m[3]) / 100;
+        const factor = diam_m * diam_m * parseFloat(m[2]);
+        const key = m[1].toUpperCase() + '|' + parseFloat(m[2]);
+        grupos[key] = (grupos[key] || 0) + qty * factor;
       });
-
-      this._ct.kame_grupos = grupos;
-      await DB.save('articles', { sku: '__ct_grupos__', grupos: grupos, ts: Date.now() });
       return grupos;
-    } catch(e) {
-      // Fallback 1: State.articles (normalizado: .sku .desc .factor) + State.kameStock
-      const artMap = {};
-      (State.articles || []).forEach(function(a) { if (a.sku) artMap[a.sku] = a; });
-      const reR = /CC\s+(\w+)\s+([\d.]+)\s*MTS.*?(\d+)\s*CM/i;
-      const reM = /METRO\s+RUMA/i;
-      if (Object.keys(State.kameStock || {}).length > 0) {
-        const grupos2 = {};
-        Object.keys(State.kameStock).forEach(function(sku) {
-          if (!sku.startsWith('TRO')) return;
-          const qty  = parseFloat(State.kameStock[sku] || 0);
-          if (qty <= 0) return;
-          const art  = artMap[sku] || {};
-          const desc = art.desc || '';  // normalizado como .desc
-          if (reM.test(desc)) {
-            const mL = desc.match(/([\d.]+)\s*MTS/i);
-            if (mL) { const k = 'METRO_RUMA|'+parseFloat(mL[1]); grupos2[k]=(grupos2[k]||0)+qty*1.5; }
-            return;
-          }
-          const m = reR.exec(desc);
-          if (!m) return;
-          // factor desde descripción: d_m² × L_m (igual que API principal)
-          const diam_m = parseInt(m[3]) / 100;
-          const factor = diam_m * diam_m * parseFloat(m[2]);
-          const key = m[1].toUpperCase() + '|' + parseFloat(m[2]);
-          grupos2[key] = (grupos2[key] || 0) + qty * factor;
-        });
-        if (Object.keys(grupos2).length > 0) {
-          this._ct.kame_grupos = grupos2;
-          await DB.save('articles', { sku: '__ct_grupos__', grupos: grupos2, ts: Date.now() });
-          return grupos2;
-        }
+    };
+
+    // Intento 1: State en memoria
+    if (Object.keys(State.kameStock || {}).length > 0 && (State.articles || []).length > 0) {
+      const grupos = buildGrupos(State.kameStock, State.articles);
+      if (Object.keys(grupos).length > 0) {
+        this._ct.kame_grupos = grupos;
+        await DB.save('articles', { sku: '__ct_grupos__', grupos: grupos, ts: Date.now() });
+        return grupos;
       }
-      // Fallback 2: caché IDB
-      try {
-        const cached = await DB.get('articles', '__ct_grupos__');
-        if (cached) { this._ct.kame_grupos = cached.grupos; return cached.grupos; }
-      } catch(_) {}
-      return {};
     }
+
+    // Intento 2: caché IDB
+    try {
+      const cached = await DB.get('articles', '__ct_grupos__');
+      if (cached && Object.keys(cached.grupos || {}).length > 0) {
+        this._ct.kame_grupos = cached.grupos;
+        return cached.grupos;
+      }
+    } catch(_) {}
+
+    return {};
   },
 
   async showCanchaTrozos() {
