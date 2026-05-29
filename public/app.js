@@ -1629,7 +1629,7 @@ const App = {
       await DB.save('articles', { sku: '__ct_grupos__', grupos: grupos, ts: Date.now() });
       return grupos;
     } catch(e) {
-      // Fallback 1: State.articles + State.kameStock (ya en memoria)
+      // Fallback 1: State.articles (normalizado: .sku .desc .factor) + State.kameStock
       const artMap = {};
       (State.articles || []).forEach(function(a) { if (a.sku) artMap[a.sku] = a; });
       const reR = /CC\s+(\w+)\s+([\d.]+)\s*MTS.*?(\d+)\s*CM/i;
@@ -1641,7 +1641,7 @@ const App = {
           const qty  = parseFloat(State.kameStock[sku] || 0);
           if (qty <= 0) return;
           const art  = artMap[sku] || {};
-          const desc = art.Descripcion || art.descripcion || art.desc || '';
+          const desc = art.desc || '';  // normalizado como .desc
           if (reM.test(desc)) {
             const mL = desc.match(/([\d.]+)\s*MTS/i);
             if (mL) { const k = 'METRO_RUMA|'+parseFloat(mL[1]); grupos2[k]=(grupos2[k]||0)+qty*1.5; }
@@ -1649,7 +1649,9 @@ const App = {
           }
           const m = reR.exec(desc);
           if (!m) return;
-          const factor = (parseInt(m[3])/100) * (parseInt(m[3])/100) * parseFloat(m[2]);
+          // factor desde descripción: d_m² × L_m (igual que API principal)
+          const diam_m = parseInt(m[3]) / 100;
+          const factor = diam_m * diam_m * parseFloat(m[2]);
           const key = m[1].toUpperCase() + '|' + parseFloat(m[2]);
           grupos2[key] = (grupos2[key] || 0) + qty * factor;
         });
