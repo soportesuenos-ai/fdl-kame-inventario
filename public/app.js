@@ -1629,6 +1629,37 @@ const App = {
       await DB.save('articles', { sku: '__ct_grupos__', grupos: grupos, ts: Date.now() });
       return grupos;
     } catch(e) {
+      // Fallback 1: State.articles + State.kameStock (ya en memoria)
+      const artMap = {};
+      (State.articles || []).forEach(function(a) { if (a.sku) artMap[a.sku] = a; });
+      const reR = /CC\s+(\w+)\s+([\d.]+)\s*MTS.*?(\d+)\s*CM/i;
+      const reM = /METRO\s+RUMA/i;
+      if (Object.keys(State.kameStock || {}).length > 0) {
+        const grupos2 = {};
+        Object.keys(State.kameStock).forEach(function(sku) {
+          if (!sku.startsWith('TRO')) return;
+          const qty  = parseFloat(State.kameStock[sku] || 0);
+          if (qty <= 0) return;
+          const art  = artMap[sku] || {};
+          const desc = art.Descripcion || art.descripcion || art.desc || '';
+          if (reM.test(desc)) {
+            const mL = desc.match(/([\d.]+)\s*MTS/i);
+            if (mL) { const k = 'METRO_RUMA|'+parseFloat(mL[1]); grupos2[k]=(grupos2[k]||0)+qty*1.5; }
+            return;
+          }
+          const m = reR.exec(desc);
+          if (!m) return;
+          const factor = (parseInt(m[3])/100) * (parseInt(m[3])/100) * parseFloat(m[2]);
+          const key = m[1].toUpperCase() + '|' + parseFloat(m[2]);
+          grupos2[key] = (grupos2[key] || 0) + qty * factor;
+        });
+        if (Object.keys(grupos2).length > 0) {
+          this._ct.kame_grupos = grupos2;
+          await DB.save('articles', { sku: '__ct_grupos__', grupos: grupos2, ts: Date.now() });
+          return grupos2;
+        }
+      }
+      // Fallback 2: caché IDB
       try {
         const cached = await DB.get('articles', '__ct_grupos__');
         if (cached) { this._ct.kame_grupos = cached.grupos; return cached.grupos; }
