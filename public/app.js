@@ -213,15 +213,41 @@ const App = {
 
   // ── CARGAR USUARIOS DESDE IDB ─────────────────────────────────────────
   async loadUsers() {
+    // Intento 1: bajar del servidor (fuente de verdad)
+    try {
+      const resp = await fetch(API_BASE + '/usuarios', { headers: apiHeaders() });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.items && data.items.length > 0) {
+          USERS = {};
+          data.items.forEach(u => { if (u.user) USERS[u.user] = u; });
+          if (!USERS['admin']) USERS['admin'] = USERS_DEFAULT['admin'];
+          // Actualizar IDB con los datos del servidor
+          await Promise.all(data.items.map(u => DB.save('users', u)));
+          return;
+        }
+      }
+    } catch(e) { /* continuar con IDB */ }
+    // Intento 2: IDB local
     try {
       const saved = await DB.getAll('users');
       if (saved.length > 0) {
         USERS = {};
         saved.forEach(u => { USERS[u.user] = u; });
-        // Admin siempre debe existir
         if (!USERS['admin']) USERS['admin'] = USERS_DEFAULT['admin'];
       }
     } catch(e) { /* usar defaults */ }
+  },
+
+  async _syncUsersToServer() {
+    try {
+      const items = Object.values(USERS).filter(u => u.user !== 'admin');
+      await fetch(API_BASE + '/usuarios', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...apiHeaders() },
+        body: JSON.stringify({ items }),
+      });
+    } catch(e) { /* silencioso, no crítico */ }
   },
 
   // ── AUTH ──────────────────────────────────────────────────────────────
@@ -498,6 +524,7 @@ const App = {
     const data = { user, nombre, pin, rol, kameUser: KAME_USUARIO };
     await DB.save('users', data);
     USERS[user] = data;
+    await App._syncUsersToServer();
     App.toast(`Usuario ${user} creado ✓`);
     App._renderUserModal && App._renderUserModal();
   },
@@ -515,6 +542,7 @@ const App = {
     };
     await DB.save('users', updated);
     USERS[user] = updated;
+    await App._syncUsersToServer();
     App.toast(`Usuario ${user} actualizado ✓`);
     App._renderUserModal && App._renderUserModal();
   },
@@ -523,6 +551,7 @@ const App = {
     if (!confirm(`¿Eliminar usuario "${user}"?`)) return;
     await DB.delete('users', user);
     delete USERS[user];
+    await App._syncUsersToServer();
     App.toast(`Usuario ${user} eliminado`);
     App._renderUserModal && App._renderUserModal();
   },
@@ -1779,13 +1808,13 @@ const App = {
         '<div style="font-weight:700;font-size:16px;margin-bottom:12px">Nueva Ruma &mdash; ' + self._ct.especie + ' ' + self._ct.largo + 'm</div>' +
 
         '<label style="font-size:12px;color:#888;font-weight:700;text-transform:uppercase">Largo de la Ruma (m)</label>' +
-        '<input id="ctLargoRuma" type="number" inputmode="decimal" step="0.01" placeholder="ej: 12.5" ' +
+        '<input id="ctLargoRuma" type="text" inputmode="decimal" placeholder="ej: 12.5" ' +
         'style="width:100%;border:1px solid #ddd;border-radius:8px;padding:10px;font-size:15px;margin:4px 0 12px;box-sizing:border-box;color:#111;background:#fff" ' +
         'oninput="App._ctRumaRender()" value="' + lgVal + '">' +
 
         '<label style="font-size:12px;color:#888;font-weight:700;text-transform:uppercase">Alturas medidas (' + alturas.length + ')</label>' +
         '<div style="display:flex;gap:8px;margin:4px 0 8px">' +
-        '<input id="ctAltInput" type="number" inputmode="decimal" step="0.01" placeholder="ej: 1.85" ' +
+        '<input id="ctAltInput" type="text" inputmode="decimal" placeholder="ej: 1.85" ' +
         'style="flex:1;border:1px solid #ddd;border-radius:8px;padding:10px;font-size:15px;color:#111;background:#fff">' +
         '<button onclick="App._ctAddAltura()" style="background:#1a3a5c;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:14px;cursor:pointer">+ Agregar</button>' +
         '</div>' +
