@@ -1779,20 +1779,20 @@ const App = {
         '<div style="font-weight:700;font-size:16px;margin-bottom:12px">Nueva Ruma &mdash; ' + self._ct.especie + ' ' + self._ct.largo + 'm</div>' +
 
         '<label style="font-size:12px;color:#888;font-weight:700;text-transform:uppercase">Largo de la Ruma (m)</label>' +
-        '<input id="ctLargoRuma" type="number" step="0.01" placeholder="ej: 12.5" ' +
-        'style="width:100%;border:1px solid #ddd;border-radius:8px;padding:10px;font-size:15px;margin:4px 0 12px;box-sizing:border-box" ' +
+        '<input id="ctLargoRuma" type="number" inputmode="decimal" step="0.01" placeholder="ej: 12.5" ' +
+        'style="width:100%;border:1px solid #ddd;border-radius:8px;padding:10px;font-size:15px;margin:4px 0 12px;box-sizing:border-box;color:#111;background:#fff" ' +
         'oninput="App._ctRumaRender()" value="' + lgVal + '">' +
 
         '<label style="font-size:12px;color:#888;font-weight:700;text-transform:uppercase">Alturas medidas (' + alturas.length + ')</label>' +
         '<div style="display:flex;gap:8px;margin:4px 0 8px">' +
-        '<input id="ctAltInput" type="number" step="0.01" placeholder="ej: 1.85" ' +
-        'style="flex:1;border:1px solid #ddd;border-radius:8px;padding:10px;font-size:15px">' +
+        '<input id="ctAltInput" type="number" inputmode="decimal" step="0.01" placeholder="ej: 1.85" ' +
+        'style="flex:1;border:1px solid #ddd;border-radius:8px;padding:10px;font-size:15px;color:#111;background:#fff">' +
         '<button onclick="App._ctAddAltura()" style="background:#1a3a5c;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:14px;cursor:pointer">+ Agregar</button>' +
         '</div>' +
 
         '<div style="margin-bottom:10px;min-height:40px">' +
         (alturas.length ? alturas.map(function(h, i) {
-          return '<span style="display:inline-block;background:#eaf0fb;border-radius:6px;padding:4px 10px;margin:2px;font-size:13px">' +
+          return '<span style="display:inline-block;background:#eaf0fb;border-radius:6px;padding:4px 10px;margin:2px;font-size:13px;color:#1a3a5c;font-weight:600">' +
             h.toFixed(2) + 'm <span onclick="App._ctDelAltura(' + i + ')" style="cursor:pointer;color:#e74c3c">&times;</span></span>';
         }).join('') : '<span style="font-size:12px;color:#aaa">Sin alturas aún</span>') +
         '</div>' +
