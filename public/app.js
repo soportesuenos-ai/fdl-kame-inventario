@@ -1945,6 +1945,7 @@ const App = {
     document.body.appendChild(modal);
   },
 
+
   // ── TOAST ─────────────────────────────────────────────────────────────
   toast(msg, dur = 3000) {
     const t = document.getElementById('toast');
@@ -1956,4 +1957,4 @@ const App = {
 };
 
 // ── BOOT ──────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => DB.open().then(() => App.boot()));
+document.addEventListener('DOMContentLoaded', () => DB.open().then(() => App.init()));
