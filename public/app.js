@@ -72,7 +72,7 @@ let db;
 const DB = {
   async open() {
     return new Promise((res, rej) => {
-      const req = indexedDB.open('KameInventario', 4);
+      const req = indexedDB.open('KameInventario', 5);
       req.onupgradeneeded = e => {
         const d = e.target.result;
         if (!d.objectStoreNames.contains('sessions'))
@@ -85,6 +85,8 @@ const DB = {
           d.createObjectStore('history', { keyPath: 'id', autoIncrement: true });
         if (!d.objectStoreNames.contains('users'))
           d.createObjectStore('users', { keyPath: 'user' });
+        if (!d.objectStoreNames.contains('cancha_tomas'))
+          d.createObjectStore('cancha_tomas', { keyPath: 'id', autoIncrement: true });
       };
       req.onsuccess = e => { db = e.target.result; res(db); };
       req.onerror = () => rej(req.error);
@@ -310,6 +312,24 @@ const App = {
         banner.style.display = 'none';
       }
     });
+
+    // ── Botón Cancha de Trozos (solo si la sesión es de esa bodega)
+    const esCancha = sess && sess.bodega === 'CANCHA DE TROZOS';
+    let btnCancha = document.getElementById('btnCanchaTrozos');
+    if (esCancha) {
+      if (!btnCancha) {
+        btnCancha = document.createElement('button');
+        btnCancha.id = 'btnCanchaTrozos';
+        btnCancha.className = 'action-card';
+        btnCancha.innerHTML = '<span style="font-size:24px">🪵</span><span>Cubicación Cancha de Trozos</span>';
+        btnCancha.onclick = () => App.showCanchaTrozos();
+        const homeActions = document.querySelector('.home-actions');
+        homeActions.insertBefore(btnCancha, homeActions.firstChild);
+      }
+      btnCancha.style.display = 'flex';
+    } else if (btnCancha) {
+      btnCancha.style.display = 'none';
+    }
 
     // ── Botón actualizar stock (siempre visible si hay sesión activa)
     let btnActStock = document.getElementById('btnActualizarStock');
@@ -1532,6 +1552,399 @@ const App = {
     modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
   },
 
+
+  // ══════════════════════════════════════════════════════════════════════
+  // ── MÓDULO CANCHA DE TROZOS ───────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════
+
+  _ct: {
+    especie: null,
+    largo: null,
+    rumas: [],
+    m3_kame_ref: 0,
+    kame_grupos: {},
+  },
+
+  async _ctNextNumero() {
+    const all = await DB.getAll('cancha_tomas');
+    const n = all.length + 1;
+    return 'CT-' + String(n).padStart(3, '0');
+  },
+
+  _ctCalcRuma(alturas, largo_ruma, largo_trozo) {
+    if (!alturas.length || !largo_ruma || !largo_trozo) return { mr: 0, m3: 0 };
+    const avg = alturas.reduce(function(a, b) { return a + b; }, 0) / alturas.length;
+    const mr  = (avg * largo_ruma * largo_trozo) / 2.44;
+    const m3  = mr * 1.56;
+    return { mr: mr, m3: m3 };
+  },
+
+  async ctCargarStock() {
+    try {
+      const bodega = encodeURIComponent('CANCHA DE TROZOS');
+      const resp   = await fetch(API_BASE + '/inventario/stock/bodega/' + bodega, { headers: apiHeaders() });
+      if (!resp.ok) throw new Error(resp.status);
+      const data  = await resp.json();
+      const items = data.items || data || [];
+
+      const maestro = {};
+      (State.articles || []).forEach(function(a) { if (a.sku) maestro[a.sku] = a; });
+
+      const grupos = {};
+      const re = /CC\s+(\w+)\s+([\d.]+)\s*MTS/i;
+      items.forEach(function(it) {
+        const sku = it.SKU || it.sku || it.articulo || it.Articulo || '';
+        if (!sku.startsWith('TRO')) return;
+        const qty    = parseFloat(it.StockActual || it.stockActual || it.stock || it.saldo || 0);
+        if (qty <= 0) return;
+        const art    = maestro[sku] || {};
+        const factor = parseFloat(art.FactorUnidadEquivalente || art.factorUnidadEquivalente || 0);
+        const desc   = it.Descripcion || it.descripcion || art.Descripcion || art.descripcion || '';
+        const m      = re.exec(desc);
+        if (!m || !factor) return;
+        const key = m[1].toUpperCase() + '|' + parseFloat(m[2]);
+        if (!grupos[key]) grupos[key] = 0;
+        grupos[key] += qty * factor;
+      });
+
+      this._ct.kame_grupos = grupos;
+      await DB.save('articles', { sku: '__ct_grupos__', grupos: grupos, ts: Date.now() });
+      return grupos;
+    } catch(e) {
+      try {
+        const cached = await DB.get('articles', '__ct_grupos__');
+        if (cached) { this._ct.kame_grupos = cached.grupos; return cached.grupos; }
+      } catch(_) {}
+      return {};
+    }
+  },
+
+  async showCanchaTrozos() {
+    App.goTo('cancha_trozos');
+    const grupos = Object.keys(this._ct.kame_grupos).length
+      ? this._ct.kame_grupos
+      : await this.ctCargarStock();
+
+    const especies = {}, largosMap = {};
+    Object.keys(grupos).forEach(function(k) {
+      const parts = k.split('|');
+      especies[parts[0]] = true;
+      largosMap[parts[1]] = true;
+    });
+    const espList = Object.keys(especies).sort();
+    const lgList  = Object.keys(largosMap).map(Number).sort(function(a,b){ return a-b; });
+
+    const el = document.getElementById('cancha_trozos');
+    if (!el) return;
+
+    el.innerHTML =
+      '<div style="padding:16px;max-width:480px;margin:0 auto">' +
+      '<div style="font-size:22px;font-weight:800;text-transform:uppercase;letter-spacing:1px;margin-bottom:16px">&#x1FA75; Cancha de Trozos</div>' +
+
+      '<div style="background:#fff;border-radius:14px;padding:16px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.08)">' +
+      '<p style="font-size:12px;font-weight:700;text-transform:uppercase;color:#888;margin-bottom:8px">1. Selecciona Especie y Largo</p>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
+      '<select id="ctEspecie" style="border:1px solid #ddd;border-radius:8px;padding:10px;font-size:14px">' +
+      '<option value="">-- Especie --</option>' +
+      espList.map(function(e) { return '<option value="' + e + '">' + e + '</option>'; }).join('') +
+      '</select>' +
+      '<select id="ctLargo" style="border:1px solid #ddd;border-radius:8px;padding:10px;font-size:14px">' +
+      '<option value="">-- Largo (m) --</option>' +
+      lgList.map(function(l) { return '<option value="' + l + '">' + l + ' m</option>'; }).join('') +
+      '</select>' +
+      '</div>' +
+      '<div id="ctRef" style="margin-top:10px;padding:10px;background:#f0f7ff;border-radius:8px;font-size:13px;display:none"></div>' +
+      '</div>' +
+
+      '<div style="background:#fff;border-radius:14px;padding:16px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.08)">' +
+      '<p style="font-size:12px;font-weight:700;text-transform:uppercase;color:#888;margin-bottom:8px">2. Medir Rumas</p>' +
+      '<div id="ctRumasList" style="margin-bottom:10px"></div>' +
+      '<button onclick="App.ctAgregarRuma()" style="width:100%;background:#1a3a5c;color:#fff;border:none;border-radius:10px;padding:12px;font-size:14px;cursor:pointer;font-weight:600">+ Agregar Ruma</button>' +
+      '</div>' +
+
+      '<div style="background:#fff;border-radius:14px;padding:16px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.08)">' +
+      '<div style="display:flex;justify-content:space-between;margin-bottom:4px">' +
+      '<span style="font-size:13px;color:#666">Total m&#xB3; s&#xF3;lido medido:</span>' +
+      '<strong id="ctTotalM3">0.000</strong>' +
+      '</div>' +
+      '<div style="display:flex;justify-content:space-between">' +
+      '<span style="font-size:13px;color:#666">M3 equiv. KAME (&times;1.2732):</span>' +
+      '<strong id="ctTotalKame">0.000</strong>' +
+      '</div>' +
+      '</div>' +
+
+      '<button id="btnCtTermine" onclick="App.ctTermine()" disabled ' +
+      'style="width:100%;background:#27ae60;color:#fff;border:none;border-radius:12px;padding:14px;font-size:15px;cursor:pointer;font-weight:700;margin-bottom:8px">' +
+      '&#x2705; Termin&#xe9; de medir</button>' +
+
+      '<button onclick="App.ctVerHistorial()" ' +
+      'style="width:100%;background:#ecf0f1;color:#555;border:none;border-radius:12px;padding:12px;font-size:14px;cursor:pointer;font-weight:600;margin-bottom:8px">' +
+      '&#x1F4CB; Historial de tomas CT</button>' +
+
+      '<button onclick="App.goTo(\'home\')" ' +
+      'style="width:100%;background:none;color:#888;border:none;font-size:13px;cursor:pointer;padding:8px">' +
+      '&#x2190; Volver</button>' +
+      '</div>';
+
+    var self = this;
+    var onSelect = function() {
+      var esp = document.getElementById('ctEspecie').value;
+      var lg  = document.getElementById('ctLargo').value;
+      var ref = document.getElementById('ctRef');
+      if (esp && lg) {
+        var key    = esp + '|' + lg;
+        var m3kame = grupos[key] || 0;
+        self._ct.especie      = esp;
+        self._ct.largo        = parseFloat(lg);
+        self._ct.m3_kame_ref  = m3kame;
+        self._ct.rumas        = [];
+        self._ctRenderRumas();
+        ref.style.display = 'block';
+        ref.innerHTML = '<b>Referencia KAME:</b> ' + m3kame.toFixed(3) + ' M3 para ' + esp + ' ' + lg + 'm';
+      } else {
+        ref.style.display = 'none';
+      }
+    };
+    document.getElementById('ctEspecie').addEventListener('change', onSelect);
+    document.getElementById('ctLargo').addEventListener('change', onSelect);
+  },
+
+  _ctRenderRumas() {
+    var el = document.getElementById('ctRumasList');
+    if (!el) return;
+    var rumas = this._ct.rumas;
+    if (!rumas.length) {
+      el.innerHTML = '<p style="font-size:13px;color:#aaa;text-align:center">Sin rumas medidas a&#xFA;n</p>';
+    } else {
+      el.innerHTML = rumas.map(function(r, i) {
+        var avgH = (r.alturas.reduce(function(a,b){return a+b;},0)/r.alturas.length).toFixed(2);
+        return '<div style="background:#f8f9fa;border-radius:8px;padding:10px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">' +
+          '<div>' +
+          '<div style="font-size:13px;font-weight:600">Ruma ' + (i+1) + ' &mdash; ' + r.alturas.length + ' alt.</div>' +
+          '<div style="font-size:11px;color:#888">Largo ruma: ' + r.largo_ruma + 'm | Alt. prom: ' + avgH + 'm</div>' +
+          '<div style="font-size:12px;color:#2980b9">MR: ' + r.mr.toFixed(3) + ' | m&#xB3;: ' + r.m3.toFixed(3) + '</div>' +
+          '</div>' +
+          '<button onclick="App._ctEliminarRuma(' + i + ')" style="background:none;border:none;color:#e74c3c;font-size:18px;cursor:pointer">&#x1F5D1;</button>' +
+          '</div>';
+      }).join('');
+    }
+
+    var totalM3   = rumas.reduce(function(s,r){ return s+r.m3; }, 0);
+    var totalKame = totalM3 * 1.2732;
+    var m3el = document.getElementById('ctTotalM3');
+    var kmel = document.getElementById('ctTotalKame');
+    var btnT = document.getElementById('btnCtTermine');
+    if (m3el) m3el.textContent = totalM3.toFixed(3);
+    if (kmel) kmel.textContent = totalKame.toFixed(3);
+    if (btnT) btnT.disabled = (rumas.length === 0 || !this._ct.especie);
+  },
+
+  _ctEliminarRuma(idx) {
+    this._ct.rumas.splice(idx, 1);
+    this._ctRenderRumas();
+  },
+
+  ctAgregarRuma() {
+    if (!this._ct.especie || !this._ct.largo) {
+      App.toast('Seleccioná especie y largo primero');
+      return;
+    }
+    var alturas = [];
+    var modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:flex;align-items:flex-end';
+    App._ctModal        = modal;
+    App._ctModalAlturas = alturas;
+
+    var self = this;
+    var render = function() {
+      var avg   = alturas.length ? (alturas.reduce(function(a,b){return a+b;},0)/alturas.length).toFixed(3) : '&mdash;';
+      var lgVal = document.getElementById('ctLargoRuma') ? document.getElementById('ctLargoRuma').value : '';
+      var lgRuma = parseFloat(lgVal) || 0;
+      var mr  = (alturas.length && lgRuma) ? ((parseFloat(avg)*lgRuma*self._ct.largo)/2.44).toFixed(3) : '&mdash;';
+      var m3  = (mr !== '&mdash;') ? (parseFloat(mr)*1.56).toFixed(3) : '&mdash;';
+
+      modal.innerHTML =
+        '<div style="background:#fff;width:100%;border-radius:16px 16px 0 0;padding:20px;max-height:85vh;overflow-y:auto">' +
+        '<div style="font-weight:700;font-size:16px;margin-bottom:12px">Nueva Ruma &mdash; ' + self._ct.especie + ' ' + self._ct.largo + 'm</div>' +
+
+        '<label style="font-size:12px;color:#888;font-weight:700;text-transform:uppercase">Largo de la Ruma (m)</label>' +
+        '<input id="ctLargoRuma" type="number" step="0.01" placeholder="ej: 12.5" ' +
+        'style="width:100%;border:1px solid #ddd;border-radius:8px;padding:10px;font-size:15px;margin:4px 0 12px;box-sizing:border-box" ' +
+        'oninput="App._ctRumaRender()" value="' + lgVal + '">' +
+
+        '<label style="font-size:12px;color:#888;font-weight:700;text-transform:uppercase">Alturas medidas (' + alturas.length + ')</label>' +
+        '<div style="display:flex;gap:8px;margin:4px 0 8px">' +
+        '<input id="ctAltInput" type="number" step="0.01" placeholder="ej: 1.85" ' +
+        'style="flex:1;border:1px solid #ddd;border-radius:8px;padding:10px;font-size:15px">' +
+        '<button onclick="App._ctAddAltura()" style="background:#1a3a5c;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:14px;cursor:pointer">+ Agregar</button>' +
+        '</div>' +
+
+        '<div style="margin-bottom:10px;min-height:40px">' +
+        (alturas.length ? alturas.map(function(h, i) {
+          return '<span style="display:inline-block;background:#eaf0fb;border-radius:6px;padding:4px 10px;margin:2px;font-size:13px">' +
+            h.toFixed(2) + 'm <span onclick="App._ctDelAltura(' + i + ')" style="cursor:pointer;color:#e74c3c">&times;</span></span>';
+        }).join('') : '<span style="font-size:12px;color:#aaa">Sin alturas aún</span>') +
+        '</div>' +
+
+        '<div style="background:#f0f7ff;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px">' +
+        '<div>Altura promedio: <b>' + avg + ' m</b></div>' +
+        '<div>MR calculado: <b>' + mr + '</b></div>' +
+        '<div>m³ sólido: <b>' + m3 + '</b></div>' +
+        '</div>' +
+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
+        '<button onclick="App._ctCerrarModal()" style="background:#ecf0f1;color:#555;border:none;border-radius:10px;padding:12px;font-size:14px;cursor:pointer">Cancelar</button>' +
+        '<button onclick="App._ctGuardarRuma()" ' + (alturas.length && lgVal ? '' : 'disabled') + ' ' +
+        'style="background:#27ae60;color:#fff;border:none;border-radius:10px;padding:12px;font-size:14px;cursor:pointer;font-weight:600">Guardar Ruma</button>' +
+        '</div>' +
+        '</div>';
+
+      App._ctModalAlturas = alturas;
+      App._ctModalRender  = render;
+    };
+
+    App._ctModalRender = render;
+    document.body.appendChild(modal);
+    render();
+  },
+
+  _ctRumaRender() { if (App._ctModalRender) App._ctModalRender(); },
+
+  _ctAddAltura() {
+    var inp = document.getElementById('ctAltInput');
+    var val = parseFloat(inp ? inp.value : '');
+    if (isNaN(val) || val <= 0) { App.toast('Altura inválida'); return; }
+    if (App._ctModalAlturas.length >= 30) { App.toast('Máximo 30 alturas'); return; }
+    App._ctModalAlturas.push(val);
+    if (inp) inp.value = '';
+    App._ctModalRender();
+    setTimeout(function(){ var el = document.getElementById('ctAltInput'); if (el) el.focus(); }, 50);
+  },
+
+  _ctDelAltura(idx) {
+    App._ctModalAlturas.splice(idx, 1);
+    App._ctModalRender();
+  },
+
+  _ctCerrarModal() {
+    if (App._ctModal) { App._ctModal.remove(); App._ctModal = null; }
+  },
+
+  _ctGuardarRuma() {
+    var lgRuma  = parseFloat(document.getElementById('ctLargoRuma') ? document.getElementById('ctLargoRuma').value : '');
+    var alturas = App._ctModalAlturas.slice();
+    if (!alturas.length || !lgRuma) return;
+    var res = App._ctCalcRuma(alturas, lgRuma, App._ct.largo);
+    App._ct.rumas.push({ largo_ruma: lgRuma, alturas: alturas, mr: res.mr, m3: res.m3 });
+    App._ctCerrarModal();
+    App._ctRenderRumas();
+  },
+
+  async ctTermine() {
+    var especie      = this._ct.especie;
+    var largo        = this._ct.largo;
+    var rumas        = this._ct.rumas;
+    var m3_kame_ref  = this._ct.m3_kame_ref;
+
+    if (!especie || !rumas.length) return;
+
+    var totalM3  = rumas.reduce(function(s,r){ return s+r.m3; }, 0);
+    var m3Equiv  = totalM3 * 1.2732;
+    var delta    = m3_kame_ref > 0 ? Math.abs(m3_kame_ref - m3Equiv) / m3_kame_ref * 100 : null;
+    var aprobada = delta !== null ? delta <= 8 : null;
+    var estado   = aprobada === null ? 'SIN_REF' : (aprobada ? 'APROBADA' : 'RECHAZADA');
+
+    var numero = await this._ctNextNumero();
+    var toma = {
+      numero:        numero,
+      ts:            Date.now(),
+      fechaStr:      new Date().toLocaleString('es-CL'),
+      user:          State.currentUser ? State.currentUser.nombre : '',
+      especie:       especie,
+      largo:         largo,
+      rumas:         rumas.map(function(r){ return { largo_ruma: r.largo_ruma, alturas: r.alturas, mr: r.mr, m3: r.m3 }; }),
+      total_mr:      rumas.reduce(function(s,r){ return s+r.mr; }, 0),
+      total_m3:      totalM3,
+      m3_kame_equiv: m3Equiv,
+      m3_kame_ref:   m3_kame_ref,
+      delta_pct:     delta,
+      estado:        estado,
+    };
+    await DB.save('cancha_tomas', toma);
+
+    var color = estado === 'APROBADA' ? '#27ae60' : estado === 'RECHAZADA' ? '#e74c3c' : '#f39c12';
+    var icon  = estado === 'APROBADA' ? '✅' : estado === 'RECHAZADA' ? '❌' : '⚠️';
+    var msg   = estado === 'APROBADA'
+      ? 'Toma aprobada. Delta ' + delta.toFixed(1) + '% ≤ 8%'
+      : estado === 'RECHAZADA'
+        ? 'Delta ' + delta.toFixed(1) + '% > 8%. Revisar mediciones y generar nueva toma.'
+        : 'Sin referencia KAME para comparar.';
+
+    var modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:flex;align-items:center;justify-content:center';
+    modal.innerHTML =
+      '<div style="background:#fff;border-radius:16px;padding:28px;max-width:340px;width:90%;text-align:center">' +
+      '<div style="font-size:48px">' + icon + '</div>' +
+      '<div style="font-weight:800;font-size:20px;color:' + color + ';margin:8px 0">' + estado + '</div>' +
+      '<div style="font-size:13px;color:#555;margin-bottom:4px">Toma <b>' + numero + '</b></div>' +
+      '<div style="font-size:13px;color:#555;margin-bottom:4px">' + especie + ' ' + largo + 'm &mdash; ' + rumas.length + ' ruma(s)</div>' +
+      '<div style="background:#f8f9fa;border-radius:8px;padding:12px;margin:12px 0;font-size:13px;text-align:left">' +
+      '<div>m³ sólido físico: <b>' + totalM3.toFixed(3) + '</b></div>' +
+      '<div>M3 equiv. KAME: <b>' + m3Equiv.toFixed(3) + '</b></div>' +
+      '<div>M3 ref. KAME: <b>' + (m3_kame_ref > 0 ? m3_kame_ref.toFixed(3) : 'N/D') + '</b></div>' +
+      (delta !== null ? '<div>Delta: <b style="color:' + color + '">' + delta.toFixed(1) + '%</b></div>' : '') +
+      '</div>' +
+      '<p style="font-size:13px;color:#666;margin-bottom:16px">' + msg + '</p>' +
+      '<button onclick="this.closest(\'div[style*=fixed]\').remove();App.showCanchaTrozos()" ' +
+      'style="width:100%;background:#1a3a5c;color:#fff;border:none;border-radius:10px;padding:12px;font-size:14px;cursor:pointer;font-weight:600">Nueva medición</button>' +
+      '</div>';
+    document.body.appendChild(modal);
+
+    this._ct.rumas   = [];
+    this._ct.especie = null;
+    this._ct.largo   = null;
+  },
+
+  async ctVerHistorial() {
+    var tomas  = await DB.getAll('cancha_tomas');
+    var sorted = tomas.sort(function(a,b){ return b.ts - a.ts; });
+
+    var modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:flex;align-items:flex-end';
+
+    var rows = !sorted.length
+      ? '<p style="padding:20px;color:#aaa;text-align:center">Sin tomas registradas</p>'
+      : sorted.map(function(t) {
+          var color = t.estado === 'APROBADA' ? '#27ae60' : t.estado === 'RECHAZADA' ? '#e74c3c' : '#f39c12';
+          var icon  = t.estado === 'APROBADA' ? '✅' : t.estado === 'RECHAZADA' ? '❌' : '⚠️';
+          return '<div style="border-bottom:1px solid #f0f0f0;padding:12px 16px">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center">' +
+            '<span style="font-weight:700;font-size:14px">' + t.numero + '</span>' +
+            '<span style="color:' + color + ';font-size:13px;font-weight:600">' + icon + ' ' + t.estado + '</span>' +
+            '</div>' +
+            '<div style="font-size:12px;color:#888;margin:2px 0">' + t.fechaStr + ' &mdash; ' + (t.user || '') + '</div>' +
+            '<div style="font-size:13px">' + t.especie + ' ' + t.largo + 'm &mdash; ' + (t.rumas ? t.rumas.length : 0) + ' ruma(s)</div>' +
+            '<div style="font-size:12px;color:#555">' +
+            'm³: ' + (t.total_m3 || 0).toFixed(3) +
+            ' | M3 equiv: ' + (t.m3_kame_equiv || 0).toFixed(3) +
+            ' | Ref KAME: ' + (t.m3_kame_ref > 0 ? t.m3_kame_ref.toFixed(3) : 'N/D') +
+            (t.delta_pct !== null && t.delta_pct !== undefined
+              ? ' | Δ <b style="color:' + color + '">' + t.delta_pct.toFixed(1) + '%</b>'
+              : '') +
+            '</div>' +
+            '</div>';
+        }).join('');
+
+    modal.innerHTML =
+      '<div style="background:#fff;width:100%;max-height:80vh;overflow-y:auto;border-radius:16px 16px 0 0">' +
+      '<div style="padding:16px;font-weight:700;font-size:18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between">' +
+      '<span>Historial Cancha de Trozos</span>' +
+      '<button onclick="this.closest(\'div[style*=fixed]\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#666">&times;</button>' +
+      '</div>' + rows + '</div>';
+    modal.addEventListener('click', function(e){ if (e.target === modal) modal.remove(); });
+    document.body.appendChild(modal);
+  },
+
   // ── TOAST ─────────────────────────────────────────────────────────────
   toast(msg, dur = 3000) {
     const t = document.getElementById('toast');
@@ -1543,4 +1956,4 @@ const App = {
 };
 
 // ── BOOT ──────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => App.init());
+document.addEventListener('DOMContentLoaded', () => DB.open().then(() => App.boot()));
