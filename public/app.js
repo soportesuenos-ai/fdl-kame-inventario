@@ -239,6 +239,19 @@ const App = {
     } catch(e) { /* usar defaults */ }
   },
 
+  async _forceSyncUsers() {
+    try {
+      const items = Object.values(USERS).filter(function(u){ return u.user !== 'admin'; });
+      const resp = await fetch(API_BASE + '/usuarios', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...apiHeaders() },
+        body: JSON.stringify({ items }),
+      });
+      if (resp.ok) App.toast('✓ Usuarios sincronizados al servidor (' + items.length + ')');
+      else App.toast('Error al sincronizar');
+    } catch(e) { App.toast('Sin conexión'); }
+  },
+
   async _syncUsersToServer() {
     try {
       const items = Object.values(USERS).filter(u => u.user !== 'admin');
@@ -504,6 +517,7 @@ const App = {
               </select>
             </div>
             <button onclick="App._saveNewUser()" style="width:100%;background:#1a3a5c;color:#fff;border:none;border-radius:10px;padding:12px;font-size:14px;cursor:pointer;font-weight:600">+ Agregar usuario</button>
+          <button onclick="App._forceSyncUsers()" style="width:100%;background:#27ae60;color:#fff;border:none;border-radius:10px;padding:10px;font-size:13px;cursor:pointer;margin-top:6px">&#x2601; Sincronizar usuarios al servidor</button>
           </div>
         </div>`;
     };
@@ -1810,7 +1824,7 @@ const App = {
         '<label style="font-size:12px;color:#888;font-weight:700;text-transform:uppercase">Largo de la Ruma (m)</label>' +
         '<input id="ctLargoRuma" type="text" inputmode="decimal" placeholder="ej: 12.5" ' +
         'style="width:100%;border:1px solid #ddd;border-radius:8px;padding:10px;font-size:15px;margin:4px 0 12px;box-sizing:border-box;color:#111;background:#fff" ' +
-        'oninput="App._ctRumaRender()" value="' + lgVal + '">' +
+        'oninput="App._ctUpdateCalc()" value="' + lgVal + '">' +
 
         '<label style="font-size:12px;color:#888;font-weight:700;text-transform:uppercase">Alturas medidas (' + alturas.length + ')</label>' +
         '<div style="display:flex;gap:8px;margin:4px 0 8px">' +
@@ -1826,7 +1840,7 @@ const App = {
         }).join('') : '<span style="font-size:12px;color:#aaa">Sin alturas aún</span>') +
         '</div>' +
 
-        '<div style="background:#f0f7ff;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px">' +
+        '<div id="ctCalcPreview" style="background:#f0f7ff;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px">' +
         '<div>Altura promedio: <b>' + avg + ' m</b></div>' +
         '<div>MR calculado: <b>' + mr + '</b></div>' +
         '<div>m³ sólido: <b>' + m3 + '</b></div>' +
@@ -1834,7 +1848,7 @@ const App = {
 
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
         '<button onclick="App._ctCerrarModal()" style="background:#ecf0f1;color:#555;border:none;border-radius:10px;padding:12px;font-size:14px;cursor:pointer">Cancelar</button>' +
-        '<button onclick="App._ctGuardarRuma()" ' + (alturas.length && lgVal ? '' : 'disabled') + ' ' +
+        '<button id="ctGuardarBtn" onclick="App._ctGuardarRuma()" ' + (alturas.length && lgVal ? '' : 'disabled') + ' ' +
         'style="background:#27ae60;color:#fff;border:none;border-radius:10px;padding:12px;font-size:14px;cursor:pointer;font-weight:600">Guardar Ruma</button>' +
         '</div>' +
         '</div>';
@@ -1849,6 +1863,24 @@ const App = {
   },
 
   _ctRumaRender() { if (App._ctModalRender) App._ctModalRender(); },
+
+  _ctUpdateCalc() {
+    // Solo actualiza la sección de resultados sin re-renderizar el modal entero
+    var calcEl = document.getElementById('ctCalcPreview');
+    if (!calcEl) return;
+    var lgVal  = document.getElementById('ctLargoRuma') ? document.getElementById('ctLargoRuma').value : '';
+    var lgRuma = parseFloat(lgVal.replace(',', '.')) || 0;
+    var alturas = App._ctModalAlturas || [];
+    var avg = alturas.length ? (alturas.reduce(function(a,b){return a+b;},0)/alturas.length) : 0;
+    var mr  = (alturas.length && lgRuma && App._ct.largo) ? ((avg*lgRuma*App._ct.largo)/2.44) : 0;
+    var m3  = mr * 1.56;
+    calcEl.innerHTML =
+      '<div>Altura promedio: <b>' + (avg ? avg.toFixed(3) : '&mdash;') + ' m</b></div>' +
+      '<div>MR calculado: <b>' + (mr ? mr.toFixed(3) : '&mdash;') + '</b></div>' +
+      '<div>m³ sólido: <b>' + (m3 ? m3.toFixed(3) : '&mdash;') + '</b></div>';
+    var btn = document.getElementById('ctGuardarBtn');
+    if (btn) btn.disabled = !(alturas.length && lgRuma);
+  },
 
   _ctAddAltura() {
     var inp = document.getElementById('ctAltInput');
@@ -1871,7 +1903,8 @@ const App = {
   },
 
   _ctGuardarRuma() {
-    var lgRuma  = parseFloat(document.getElementById('ctLargoRuma') ? document.getElementById('ctLargoRuma').value : '');
+    var lgRumaRaw = document.getElementById('ctLargoRuma') ? document.getElementById('ctLargoRuma').value : '';
+    var lgRuma  = parseFloat(lgRumaRaw.replace(',', '.'));
     var alturas = App._ctModalAlturas.slice();
     if (!alturas.length || !lgRuma) return;
     var res = App._ctCalcRuma(alturas, lgRuma, App._ct.largo);
