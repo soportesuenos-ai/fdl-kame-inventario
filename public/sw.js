@@ -1,4 +1,4 @@
-const CACHE  = 'kame-inv-v32';
+const CACHE  = 'kame-inv-v33';
 const ASSETS = ['/', '/index.html', '/config.js', '/app.js', '/style.css', '/articulos.js', '/manifest.json'];
 
 self.addEventListener('install', e => {
