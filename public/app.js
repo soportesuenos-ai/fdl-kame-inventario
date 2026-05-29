@@ -255,6 +255,7 @@ const App = {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById(screen)?.classList.add('active');
 
+    if (screen === 'home')        App.refreshHomeState();
     if (screen === 'count')       App.renderArticleList();
     if (screen === 'review')      App.renderReview();
     if (screen === 'sync')        App.renderSync();
