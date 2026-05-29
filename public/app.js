@@ -373,9 +373,9 @@ const App = {
       State.kameStock  = {};
       State.bodegaList = [];
       (data.items || data || []).forEach(it => {
-        const sku = it.SKU || it.sku || it.Sku;
-        const qty = parseFloat(it.StockActual ?? it.stockActual ?? it.stock ?? 0);
-        if (sku) { State.kameStock[sku] = qty; State.bodegaList.push(sku); }
+        const sku = it.SKU || it.sku || it.Sku || it.articulo || it.Articulo;
+        const qty = parseFloat(it.StockActual ?? it.stockActual ?? it.stock ?? it.cantidad ?? it.saldo ?? 0);
+        if (sku && qty > 0) { State.kameStock[sku] = qty; State.bodegaList.push(sku); }
       });
       await DB.save('articles', { sku: `stock_${sess.bodega}`, stock: State.kameStock, list: State.bodegaList });
       App.toast(`✓ Stock actualizado: ${State.bodegaList.length} artículos`);
