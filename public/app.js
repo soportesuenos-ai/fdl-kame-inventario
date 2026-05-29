@@ -45,12 +45,14 @@ function calcPrecioCosto(desc) {
   else                       costoPulg = 1000; // default 2ª
   return Math.round(factor * costoPulg);
 }
-const USERS = {
+// Usuarios por defecto (se sobrescriben con los de IDB si existen)
+const USERS_DEFAULT = {
   'admin':   { pin: '1234', nombre: 'Administrador',  rol: 'admin',  kameUser: KAME_USUARIO },
   'bodega1': { pin: '2580', nombre: 'Bodeguero 1',    rol: 'bodega', kameUser: KAME_USUARIO },
   'bodega2': { pin: '1470', nombre: 'Bodeguero 2',    rol: 'bodega', kameUser: KAME_USUARIO },
   'jefe':    { pin: '9999', nombre: 'Jefe de Patio',  rol: 'jefe',   kameUser: KAME_USUARIO },
 };
+let USERS = { ...USERS_DEFAULT };
 
 // ─── STATE ────────────────────────────────────────────────────────────────
 const State = {
@@ -70,7 +72,7 @@ let db;
 const DB = {
   async open() {
     return new Promise((res, rej) => {
-      const req = indexedDB.open('KameInventario', 3);
+      const req = indexedDB.open('KameInventario', 4);
       req.onupgradeneeded = e => {
         const d = e.target.result;
         if (!d.objectStoreNames.contains('sessions'))
@@ -81,6 +83,8 @@ const DB = {
           d.createObjectStore('pending', { keyPath: 'id', autoIncrement: true });
         if (!d.objectStoreNames.contains('history'))
           d.createObjectStore('history', { keyPath: 'id', autoIncrement: true });
+        if (!d.objectStoreNames.contains('users'))
+          d.createObjectStore('users', { keyPath: 'user' });
       };
       req.onsuccess = e => { db = e.target.result; res(db); };
       req.onerror = () => rej(req.error);
@@ -205,11 +209,25 @@ const App = {
     }
   },
 
+  // ── CARGAR USUARIOS DESDE IDB ─────────────────────────────────────────
+  async loadUsers() {
+    try {
+      const saved = await DB.getAll('users');
+      if (saved.length > 0) {
+        USERS = {};
+        saved.forEach(u => { USERS[u.user] = u; });
+        // Admin siempre debe existir
+        if (!USERS['admin']) USERS['admin'] = USERS_DEFAULT['admin'];
+      }
+    } catch(e) { /* usar defaults */ }
+  },
+
   // ── AUTH ──────────────────────────────────────────────────────────────
-  login() {
+  async login() {
     const user = document.getElementById('loginUser').value.trim().toLowerCase();
     const pin  = document.getElementById('loginPin').value.trim();
     const err  = document.getElementById('loginError');
+    await App.loadUsers();
     if (!USERS[user] || USERS[user].pin !== pin) {
       err.textContent = 'Usuario o PIN incorrecto';
       document.getElementById('loginPin').value = '';
@@ -258,10 +276,11 @@ const App = {
   },
 
   refreshHomeState() {
-    const sess = State.currentSession;
-    const card  = document.getElementById('activeSessionCard');
-    const btnR  = document.getElementById('btnReview');
-    const btnS  = document.getElementById('btnSync');
+    const sess    = State.currentSession;
+    const isAdmin = State.currentUser?.rol === 'admin';
+    const card    = document.getElementById('activeSessionCard');
+    const btnR    = document.getElementById('btnReview');
+    const btnS    = document.getElementById('btnSync');
 
     if (sess) {
       const count = Object.keys(sess.items || {}).length;
@@ -270,11 +289,15 @@ const App = {
       document.getElementById('activeSessionStats').textContent =
         `${count} artículo${count !== 1 ? 's' : ''} contado${count !== 1 ? 's' : ''}`;
       btnR.disabled = count === 0;
-      btnS.disabled = count === 0;
+      // Ocultar "Subir a KAME" completamente para no-admin
+      if (btnS) {
+        btnS.style.display = isAdmin ? 'flex' : 'none';
+        btnS.disabled = count === 0;
+      }
     } else {
       card.style.display = 'none';
       btnR.disabled = true;
-      btnS.disabled = true;
+      if (btnS) { btnS.style.display = isAdmin ? 'flex' : 'none'; btnS.disabled = true; }
     }
 
     // Pendientes offline
@@ -288,7 +311,22 @@ const App = {
       }
     });
 
-    // Botón historial solo para admin
+    // ── Botón actualizar stock (siempre visible si hay sesión activa)
+    let btnActStock = document.getElementById('btnActualizarStock');
+    if (!btnActStock) {
+      btnActStock = document.createElement('button');
+      btnActStock.id = 'btnActualizarStock';
+      btnActStock.className = 'action-card';
+      btnActStock.innerHTML = '<span style="font-size:24px">🔄</span><span>Actualizar stock KAME</span>';
+      btnActStock.onclick = () => App.actualizarStock();
+      // Insertar antes de "Nueva toma"
+      const homeActions = document.querySelector('.home-actions');
+      homeActions.insertBefore(btnActStock, homeActions.firstChild);
+    }
+
+    // ── Botones solo para admin
+    const adminContainer = document.getElementById('btnConsolidar').parentNode;
+
     let histBtn = document.getElementById('btnHistorial');
     if (isAdmin) {
       if (!histBtn) {
@@ -297,13 +335,157 @@ const App = {
         histBtn.className = 'action-card';
         histBtn.innerHTML = '<span style="font-size:24px">📋</span><span>Historial de inventarios</span>';
         histBtn.onclick = () => App.showHistory();
-        histBtn.style.display = 'flex';
-        document.getElementById('btnConsolidar').parentNode.appendChild(histBtn);
+        adminContainer.appendChild(histBtn);
       }
       histBtn.style.display = 'flex';
     } else if (histBtn) {
       histBtn.style.display = 'none';
     }
+
+    // ── Gestión de usuarios (solo admin)
+    let btnUsers = document.getElementById('btnGestionUsuarios');
+    if (isAdmin) {
+      if (!btnUsers) {
+        btnUsers = document.createElement('button');
+        btnUsers.id = 'btnGestionUsuarios';
+        btnUsers.className = 'action-card';
+        btnUsers.innerHTML = '<span style="font-size:24px">👥</span><span>Gestionar usuarios</span>';
+        btnUsers.onclick = () => App.showUserManager();
+        adminContainer.appendChild(btnUsers);
+      }
+      btnUsers.style.display = 'flex';
+    } else if (btnUsers) {
+      btnUsers.style.display = 'none';
+    }
+  },
+
+  // ── ACTUALIZAR STOCK KAME ─────────────────────────────────────────────
+  async actualizarStock() {
+    const sess = State.currentSession;
+    if (!sess) { App.toast('Iniciá una sesión primero'); return; }
+    const btn = document.getElementById('btnActualizarStock');
+    if (btn) btn.innerHTML = '<span style="font-size:24px">⏳</span><span>Cargando stock...</span>';
+    try {
+      const bodega = encodeURIComponent(sess.bodega);
+      const resp   = await fetch(`${API_BASE}/inventario/stock/bodega/${bodega}`, { headers: apiHeaders() });
+      if (!resp.ok) throw new Error(resp.status);
+      const data = await resp.json();
+      State.kameStock  = {};
+      State.bodegaList = [];
+      (data.items || data || []).forEach(it => {
+        const sku = it.SKU || it.sku || it.Sku;
+        const qty = parseFloat(it.StockActual ?? it.stockActual ?? it.stock ?? 0);
+        if (sku) { State.kameStock[sku] = qty; State.bodegaList.push(sku); }
+      });
+      await DB.save('articles', { sku: `stock_${sess.bodega}`, stock: State.kameStock, list: State.bodegaList });
+      App.toast(`✓ Stock actualizado: ${State.bodegaList.length} artículos`);
+    } catch(e) {
+      App.toast('Sin conexión — usando stock guardado');
+    }
+    if (btn) btn.innerHTML = '<span style="font-size:24px">🔄</span><span>Actualizar stock KAME</span>';
+  },
+
+  // ── GESTIÓN DE USUARIOS ───────────────────────────────────────────────
+  async showUserManager() {
+    await App.loadUsers();
+    let modal = document.getElementById('userModal');
+    if (modal) modal.remove();
+    modal = document.createElement('div');
+    modal.id = 'userModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9998;display:flex;align-items:flex-end;';
+    document.body.appendChild(modal);
+
+    const renderModal = () => {
+      const rows = Object.entries(USERS).map(([u, d]) => `
+        <tr style="border-bottom:1px solid #f0f0f0">
+          <td style="padding:8px 6px;font-family:monospace;font-weight:600">${u}</td>
+          <td style="padding:8px 6px">${d.nombre}</td>
+          <td style="padding:8px 6px"><span style="background:${d.rol==='admin'?'#1a3a5c':d.rol==='jefe'?'#e67e22':'#27ae60'};color:#fff;padding:2px 8px;border-radius:10px;font-size:11px">${d.rol}</span></td>
+          <td style="padding:8px 6px;font-family:monospace">${'●'.repeat(d.pin.length)}</td>
+          <td style="padding:8px 6px;text-align:center">
+            ${u !== 'admin' ? `<button onclick="App._editUser('${u}')" style="background:none;border:1px solid #2980b9;color:#2980b9;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:12px;margin-right:4px">✏️</button>
+            <button onclick="App._deleteUser('${u}')" style="background:none;border:1px solid #e74c3c;color:#e74c3c;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:12px">🗑</button>` : '<span style="color:#aaa;font-size:12px">protegido</span>'}
+          </td>
+        </tr>`).join('');
+
+      modal.innerHTML = `
+        <div style="background:#fff;width:100%;max-height:90vh;border-radius:16px 16px 0 0;overflow:auto">
+          <div style="padding:16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eee;position:sticky;top:0;background:#fff">
+            <b style="font-size:16px">👥 Gestión de Usuarios</b>
+            <button onclick="document.getElementById('userModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">✕</button>
+          </div>
+          <div style="padding:12px 16px">
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead><tr style="color:#888;font-size:11px;border-bottom:2px solid #eee">
+                <th style="text-align:left;padding:6px">Usuario</th>
+                <th style="text-align:left;padding:6px">Nombre</th>
+                <th style="text-align:left;padding:6px">Rol</th>
+                <th style="text-align:left;padding:6px">PIN</th>
+                <th style="padding:6px">Acciones</th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+          <div style="padding:16px;border-top:1px solid #eee">
+            <p style="font-size:12px;color:#888;margin-bottom:10px">Nuevo usuario</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+              <input id="nuUser"   placeholder="usuario (sin espacios)" style="border:1px solid #ddd;border-radius:8px;padding:8px;font-size:13px">
+              <input id="nuNombre" placeholder="Nombre completo"        style="border:1px solid #ddd;border-radius:8px;padding:8px;font-size:13px">
+              <input id="nuPin"    placeholder="PIN (números)"  type="password" style="border:1px solid #ddd;border-radius:8px;padding:8px;font-size:13px">
+              <select id="nuRol" style="border:1px solid #ddd;border-radius:8px;padding:8px;font-size:13px">
+                <option value="bodega">bodega</option>
+                <option value="jefe">jefe</option>
+                <option value="admin">admin</option>
+              </select>
+            </div>
+            <button onclick="App._saveNewUser()" style="width:100%;background:#1a3a5c;color:#fff;border:none;border-radius:10px;padding:12px;font-size:14px;cursor:pointer;font-weight:600">+ Agregar usuario</button>
+          </div>
+        </div>`;
+    };
+
+    renderModal();
+
+    App._renderUserModal = renderModal;
+  },
+
+  async _saveNewUser() {
+    const user   = document.getElementById('nuUser').value.trim().toLowerCase().replace(/\s/g,'');
+    const nombre = document.getElementById('nuNombre').value.trim();
+    const pin    = document.getElementById('nuPin').value.trim();
+    const rol    = document.getElementById('nuRol').value;
+    if (!user || !nombre || !pin) { App.toast('Completá todos los campos'); return; }
+    if (!/^\d{4,8}$/.test(pin))   { App.toast('PIN debe ser 4-8 dígitos'); return; }
+    if (USERS[user])               { App.toast('Usuario ya existe'); return; }
+    const data = { user, nombre, pin, rol, kameUser: KAME_USUARIO };
+    await DB.save('users', data);
+    USERS[user] = data;
+    App.toast(`Usuario ${user} creado ✓`);
+    App._renderUserModal && App._renderUserModal();
+  },
+
+  async _editUser(user) {
+    const d = USERS[user];
+    if (!d) return;
+    const nuPin    = prompt(`Nuevo PIN para ${user} (dejar vacío para no cambiar):`);
+    const nuNombre = prompt(`Nuevo nombre (actual: ${d.nombre}):`);
+    if (nuPin && !/^\d{4,8}$/.test(nuPin)) { App.toast('PIN debe ser 4-8 dígitos'); return; }
+    const updated = {
+      ...d,
+      pin:    nuPin    || d.pin,
+      nombre: nuNombre || d.nombre,
+    };
+    await DB.save('users', updated);
+    USERS[user] = updated;
+    App.toast(`Usuario ${user} actualizado ✓`);
+    App._renderUserModal && App._renderUserModal();
+  },
+
+  async _deleteUser(user) {
+    if (!confirm(`¿Eliminar usuario "${user}"?`)) return;
+    await DB.delete('users', user);
+    delete USERS[user];
+    App.toast(`Usuario ${user} eliminado`);
+    App._renderUserModal && App._renderUserModal();
   },
 
   // ── SESSION ───────────────────────────────────────────────────────────
@@ -661,6 +843,10 @@ const App = {
     document.getElementById('statOk').textContent = ok;
     document.getElementById('statDiff').textContent = diff;
 
+    // Ocultar "Subir a KAME" en pantalla de revisión si no es admin
+    const btnGoSync = document.getElementById('btnGoSync');
+    if (btnGoSync) btnGoSync.style.display = State.currentUser?.rol === 'admin' ? '' : 'none';
+
     const filter = State.reviewFilter;
     const visible = rows.filter(r => {
       if (filter === 'diff') return r.delta !== 0 && r.delta !== null;
@@ -755,11 +941,16 @@ const App = {
 
     const items = Object.entries(sess.items || {});
     let ok = 0, errors = 0;
+    // Acumula resultado por SKU para el historial (incluye folio)
+    const histItems = [];
     addLog(`Iniciando sincronización: ${items.length} artículos`);
 
     for (const [sku, item] of items) {
       const kame = State.kameStock[sku];
-      if (kame === undefined || item.qty === kame) { ok++; continue; }
+      if (kame === undefined || item.qty === kame) {
+        histItems.push({ sku, qty: item.qty, kame: kame ?? null, diff: 0, tipo: '—', folio: '' });
+        ok++; continue;
+      }
 
       const diff = item.qty - kame;
       const tipo  = diff > 0 ? 'ENTRADA' : 'SALIDA';
@@ -792,17 +983,20 @@ const App = {
         });
 
         if (resp.ok) {
-          const rj = await resp.json().catch(() => ({}));
-          const folio = rj?.Folio ?? rj?.folio ?? '';
+          const rj    = await resp.json().catch(() => ({}));
+          const folio = rj?.Folio ?? rj?.folio ?? rj?.folio_movimiento ?? '';
           addLog(`✓ ${sku}: ${tipo} ${Math.abs(diff)} unidades${folio ? ' — Folio ' + folio : ''}`);
-          itemDet._folio = folio;
+          histItems.push({ sku, qty: item.qty, kame, diff, tipo, folio: String(folio) });
           ok++;
         } else {
-          addLog(`✗ ${sku}: Error ${resp.status}`, true);
+          const errTxt = await resp.text().catch(() => resp.status);
+          addLog(`✗ ${sku}: Error ${resp.status} — ${errTxt}`, true);
+          histItems.push({ sku, qty: item.qty, kame, diff, tipo, folio: '', error: resp.status });
           errors++;
         }
       } catch(e) {
         addLog(`✗ ${sku}: Sin conexión`, true);
+        histItems.push({ sku, qty: item.qty, kame: kame ?? null, diff, tipo, folio: '', error: 'timeout' });
         errors++;
       }
     }
@@ -814,7 +1008,7 @@ const App = {
       document.getElementById('syncMsg').textContent   = '¡Sincronizado!';
       document.getElementById('syncDetail').textContent = `${ok} movimientos registrados en KAME`;
       App.toast('Inventario subido a KAME ✓');
-      // Guardar historial antes de borrar
+      // Guardar historial con folios reales por SKU
       await DB.save('history', {
         ts:          Date.now(),
         fechaStr:    new Date().toLocaleString('es-CL'),
@@ -822,12 +1016,10 @@ const App = {
         user:        State.currentUser?.nombre || '',
         bodega:      sess.bodega || '',
         fechaConteo: sess.fecha  || '',
+        resp:        sess.resp   || '',
         totalOk:     ok,
         totalItems:  Object.keys(sess.items || {}).length,
-        items:       Object.entries(sess.items || {}).map(([sku, it]) => ({
-          sku, qty: it.qty,
-          kame: State.kameStock[sku] ?? null,
-        })),
+        items:       histItems,
       });
       // Limpiar sesión
       await DB.delete('sessions', 'current');
@@ -1115,12 +1307,16 @@ const App = {
       user:        State.currentUser?.nombre || '',
       bodega,
       fechaConteo: fecha,
+      resp:        State.currentUser?.nombre || '',
       totalOk:     ok,
       totalErrors: errors,
       totalItems:  diffs.length,
       items:       diffs.map(i => ({
-        sku: i.sku, qty_contada: i.qty_contada,
-        kame: App._consoKameStock[i.sku] ?? null,
+        sku:   i.sku,
+        qty:   i.qty_contada,
+        kame:  App._consoKameStock[i.sku] ?? null,
+        diff:  i.qty_contada - (App._consoKameStock[i.sku] ?? 0),
+        tipo:  (i.qty_contada - (App._consoKameStock[i.sku] ?? 0)) > 0 ? 'ENTRADA' : 'SALIDA',
         folio: i._folio ?? '',
       })),
     });
@@ -1176,15 +1372,12 @@ const App = {
       App._consoStockTs   = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
       const tsEl = document.getElementById('consoStockTs');
       if (tsEl) tsEl.textContent = App._consoStockTs;
-
-      // Recalcular stats de diferencias
       const diffs = App._consoData.filter(i => {
         const kame = kameStock[i.sku] ?? null;
         return kame === null || i.qty_contada !== kame;
       }).length;
       const diffsEl = document.getElementById('consoNumDiffs');
       if (diffsEl) diffsEl.textContent = diffs;
-
       App.renderConsolidado();
       App.toast(`✓ Stock actualizado a las ${App._consoStockTs}`);
     } catch(e) { App.toast('Error al refrescar stock'); }
@@ -1203,54 +1396,35 @@ const App = {
   async trySyncPending() {
     const pendingList = await DB.getAll('pending');
     if (pendingList.length === 0) return;
-
     App.toast(`🔄 Sincronizando ${pendingList.length} sesión(es) pendiente(s)...`);
-
     let totalOk = 0, totalErrors = 0;
-
     for (const pendingEntry of pendingList) {
       const sess = pendingEntry.session;
       if (!sess || !sess.items) continue;
-
-      // Intentar obtener stock de bodega para calcular diferencias
       let kameStock = {};
       try {
         const bodega = encodeURIComponent(sess.bodega);
         const r = await fetch(`${API_BASE}/inventario/stock/bodega/${bodega}`, { headers: apiHeaders() });
         if (r.ok) {
           const data  = await r.json();
-          const items = data.items || data || [];
-          for (const item of items) {
+          for (const item of (data.items || data || [])) {
             const sku = item.sku || item.SKU || item.articulo || item.Articulo;
             const qty = parseFloat(item.stock ?? item.cantidad ?? item.saldo ?? 0);
             if (sku && qty > 0) kameStock[sku] = qty;
           }
         }
-      } catch(e) {
-        App.toast('Sin conexión para sincronizar pendientes');
-        return;
-      }
+      } catch(e) { App.toast('Sin conexión para sincronizar pendientes'); return; }
 
-      // Enviar movimientos — contador por sesión para decidir si eliminar
       const entries = Object.entries(sess.items || {});
       let sessionOk = 0, sessionErrors = 0;
-
       for (const [sku, data] of entries) {
-        const conteo = parseFloat(data.qty ?? data.conteo ?? data.count ?? 0);
-        const stock  = parseFloat(kameStock[sku] ?? data.stockKame ?? 0);
+        const conteo = parseFloat(data.qty ?? data.conteo ?? 0);
+        const stock  = parseFloat(kameStock[sku] ?? 0);
         const diff   = conteo - stock;
         if (diff === 0) { sessionOk++; continue; }
-
-        const tipo    = diff > 0 ? 'ENTRADA' : 'SALIDA';
-        const art     = State.articles.find(a => a.sku === sku);
-        const precio  = calcPrecioCosto(art?.desc || '');
-        const cant    = Math.abs(diff);
-        const itemDet = {
-          sku, cantidad: cant, unidadNegocio: UNIDAD_NEGOCIO,
-          ...(tipo === 'ENTRADA' ? { precioUnitario: precio, totalLinea: Math.round(cant * precio) } : {}),
-        };
+        const tipo = diff > 0 ? 'ENTRADA' : 'SALIDA';
         const body = {
-          usuario:          KAME_USUARIO,
+          usuario:          pendingEntry.user || KAME_USUARIO,
           tipoDocumento:    tipo,
           fecha:            sess.fecha || new Date().toISOString().slice(0, 10),
           motivoMovimiento: tipo === 'ENTRADA' ? 'Entrada por producción' : 'Merma',
@@ -1258,44 +1432,30 @@ const App = {
           bodegaEntrada:    diff > 0 ? sess.bodega : '',
           bodegaSalida:     diff < 0 ? sess.bodega : '',
           comentario:       `Sync pendiente - ${sess.fecha || ''} - ${sess.resp || ''}`,
-          items:            [itemDet],
+          items:            [{ sku, cantidad: Math.abs(diff), unidadNegocio: UNIDAD_NEGOCIO }],
         };
-
         try {
           const r = await fetch(`${API_BASE}/inventario/movimiento`, {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json', ...apiHeaders() },
-            body:    JSON.stringify(body),
+            method: 'POST', headers: { 'Content-Type': 'application/json', ...apiHeaders() },
+            body: JSON.stringify(body),
           });
-          if (r.ok) sessionOk++;
-          else sessionErrors++;
-        } catch(e) {
-          sessionErrors++;
-        }
+          if (r.ok) sessionOk++; else sessionErrors++;
+        } catch(e) { sessionErrors++; }
       }
-
-      totalOk     += sessionOk;
-      totalErrors += sessionErrors;
-
-      // Solo eliminar la sesión pendiente si todos sus movimientos se enviaron OK
-      if (sessionErrors === 0) {
-        await DB.delete('pending', pendingEntry.id);
-      }
+      totalOk += sessionOk; totalErrors += sessionErrors;
+      if (sessionErrors === 0) await DB.delete('pending', pendingEntry.id);
     }
-
     App.toast(`Sincronización: ${totalOk} OK, ${totalErrors} errores`);
   },
-
 
   qrNotReady() {
     App.toast('Escáner QR próximamente — buscá el artículo por nombre o SKU');
   },
 
-  // ── HISTORIAL ────────────────────────────────────────────────────────────
+  // ── HISTORIAL ─────────────────────────────────────────────────────────
   async showHistory() {
     const records = await DB.getAll('history');
     records.sort((a, b) => b.ts - a.ts);
-
     let modal = document.getElementById('historyModal');
     if (modal) modal.remove();
     modal = document.createElement('div');
@@ -1304,47 +1464,64 @@ const App = {
     document.body.appendChild(modal);
 
     const rows = records.length === 0
-      ? '<p style="padding:16px;color:#888;text-align:center">Sin historial aún</p>'
-      : records.map(r => {
-          const folios = (r.items || []).filter(i => i.folio).map(i => i.folio).join(', ');
-          return `
-          <div style="padding:12px 16px;border-bottom:1px solid #eee">
-            <div style="font-weight:600;font-size:14px">${r.fechaStr} — ${r.tipo === 'consolidado' ? '🗂 Consolidado' : '📋 Sesión'}</div>
-            <div style="font-size:13px;color:#555;margin-top:2px">
-              Bodega: <b>${r.bodega}</b> &nbsp;|&nbsp; Conteo: <b>${r.fechaConteo}</b>
-            </div>
-            <div style="font-size:13px;color:#555">
-              Usuario: ${r.user} &nbsp;|&nbsp; ${r.totalOk} mov. OK &nbsp;|&nbsp; ${r.totalItems} ítems
-            </div>
-            ${folios ? `<div style="font-size:12px;color:#888;margin-top:2px">Folios: ${folios}</div>` : ''}
-          </div>`;
+      ? '<p style="padding:16px;color:#888;text-align:center">Sin historial aun</p>'
+      : records.map(rec => {
+          const badge = rec.tipo === 'consolidado'
+            ? '<span style="background:#7c3aed;color:#fff;border-radius:4px;padding:2px 7px;font-size:11px">CONSOLIDADO</span>'
+            : '<span style="background:#2563eb;color:#fff;border-radius:4px;padding:2px 7px;font-size:11px">SESION</span>';
+          const conDiff = (rec.items || []).filter(i => i.folio || (i.diff && i.diff !== 0));
+          const folioRows = conDiff.length > 0
+            ? '<table style="width:100%;font-size:11px;margin-top:6px;border-collapse:collapse">' +
+              '<tr style="color:#888;border-bottom:1px solid #eee">' +
+              '<th style="text-align:left;padding:2px 4px">SKU</th>' +
+              '<th style="text-align:right;padding:2px 4px">KAME</th>' +
+              '<th style="text-align:right;padding:2px 4px">Contado</th>' +
+              '<th style="text-align:right;padding:2px 4px">Dif.</th>' +
+              '<th style="text-align:left;padding:2px 4px">Tipo</th>' +
+              '<th style="text-align:left;padding:2px 4px">Folio</th></tr>' +
+              conDiff.map(i =>
+                '<tr style="border-bottom:1px solid #f5f5f5">' +
+                '<td style="padding:2px 4px;font-family:monospace">' + i.sku + '</td>' +
+                '<td style="text-align:right;padding:2px 4px">' + (i.kame != null ? i.kame : '-') + '</td>' +
+                '<td style="text-align:right;padding:2px 4px">' + (i.qty != null ? i.qty : (i.qty_contada != null ? i.qty_contada : '-')) + '</td>' +
+                '<td style="text-align:right;padding:2px 4px;color:' + (i.diff > 0 ? '#27ae60' : i.diff < 0 ? '#e74c3c' : '#888') + '">' + (i.diff > 0 ? '+' + i.diff : (i.diff || '-')) + '</td>' +
+                '<td style="padding:2px 4px">' + (i.tipo || '-') + '</td>' +
+                '<td style="padding:2px 4px;font-weight:' + (i.folio ? '600' : 'normal') + ';color:' + (i.folio ? '#2980b9' : '#aaa') + '">' + (i.folio || (i.error ? 'Error' : '=')) + '</td>' +
+                '</tr>'
+              ).join('') +
+              '</table>'
+            : '';
+          const respLine = rec.resp && rec.resp !== rec.user
+            ? ' | subido por: ' + rec.resp : '';
+          return '<div style="padding:12px 16px;border-bottom:1px solid #eee">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">' +
+            badge +
+            '<span style="font-size:12px;color:#888">' + rec.fechaStr + '</span></div>' +
+            '<div style="font-weight:600;margin-bottom:2px">' + (rec.bodega || '') + ' - ' + (rec.fechaConteo || '') + '</div>' +
+            '<div style="font-size:13px;color:#888">' + (rec.user || '') + respLine +
+            ' | ' + (rec.totalOk || 0) + ' OK' + (rec.totalErrors ? ' / ' + rec.totalErrors + ' errores' : '') +
+            ' / ' + (rec.totalItems || 0) + ' items</div>' +
+            folioRows + '</div>';
         }).join('');
 
-    modal.innerHTML = `
-      <div style="background:#fff;width:100%;max-height:80vh;border-radius:16px 16px 0 0;overflow:auto">
-        <div style="padding:16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eee;position:sticky;top:0;background:#fff">
-          <b style="font-size:16px">📋 Historial de inventarios</b>
-          <button onclick="document.getElementById('historyModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">✕</button>
-        </div>
-        ${rows}
-      </div>`;
+    modal.innerHTML =
+      '<div style="background:#fff;width:100%;max-height:80vh;overflow-y:auto;border-radius:16px 16px 0 0">' +
+      '<div style="padding:16px;font-weight:700;font-size:18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between">' +
+      '<span>Historial de tomas</span>' +
+      '<button onclick="document.getElementById(\'historyModal\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#666">&times;</button>' +
+      '</div>' + rows + '</div>';
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
   },
 
-  toast(msg, duration = 2500) {
-    let el = document.getElementById('toast');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'toast';
-      el.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:10px 20px;border-radius:20px;z-index:9999;font-size:14px;opacity:0;transition:opacity .3s;pointer-events:none;';
-      document.body.appendChild(el);
-    }
-    el.textContent = msg;
-    el.style.opacity = '1';
-    clearTimeout(el._t);
-    el._t = setTimeout(() => { el.style.opacity = '0'; }, duration);
+  // ── TOAST ─────────────────────────────────────────────────────────────
+  toast(msg, dur = 3000) {
+    const t = document.getElementById('toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), dur);
   },
-
 };
 
-// ── BOOT ──────────────────────────────────────────────────────────────────────
+// ── BOOT ──────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => App.init());
