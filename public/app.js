@@ -1588,22 +1588,39 @@ const App = {
       const data  = await resp.json();
       const items = data.items || data || [];
 
-      const maestro = {};
-      (State.articles || []).forEach(function(a) { if (a.sku) maestro[a.sku] = a; });
+      // Regex para extraer especie, largo y diámetro desde la descripción
+      // Ej: "ROLLIZO INDUSTRIAL CC INSIGNE 2.44 MTS 28 CM DIAMETRO"
+      const reRollizo = /CC\s+(\w+)\s+([\d.]+)\s*MTS.*?(\d+)\s*CM/i;
+      const reMR      = /METRO\s+RUMA/i;
 
       const grupos = {};
-      const re = /CC\s+(\w+)\s+([\d.]+)\s*MTS/i;
+
       items.forEach(function(it) {
-        const sku = it.SKU || it.sku || it.articulo || it.Articulo || '';
+        const sku  = it.SKU || it.sku || it.articulo || it.Articulo || '';
         if (!sku.startsWith('TRO')) return;
-        const qty    = parseFloat(it.StockActual || it.stockActual || it.stock || it.saldo || 0);
+        const qty  = parseFloat(it.StockActual || it.stockActual || it.stock || it.saldo || 0);
         if (qty <= 0) return;
-        const art    = maestro[sku] || {};
-        const factor = parseFloat(art.FactorUnidadEquivalente || art.factorUnidadEquivalente || 0);
-        const desc   = it.Descripcion || it.descripcion || art.Descripcion || art.descripcion || '';
-        const m      = re.exec(desc);
-        if (!m || !factor) return;
-        const key = m[1].toUpperCase() + '|' + parseFloat(m[2]);
+        const desc = it.Descripcion || it.descripcion || '';
+
+        if (reMR.test(desc)) {
+          // METRO RUMA: factor hardcodeado = 1.5 (confirmado del maestro)
+          const mLargo = desc.match(/([\d.]+)\s*MTS/i);
+          if (mLargo) {
+            const key = 'METRO_RUMA|' + parseFloat(mLargo[1]);
+            if (!grupos[key]) grupos[key] = 0;
+            grupos[key] += qty * 1.5;
+          }
+          return;
+        }
+
+        const m = reRollizo.exec(desc);
+        if (!m) return;
+        const especie = m[1].toUpperCase();
+        const largo   = parseFloat(m[2]);
+        const diam_m  = parseInt(m[3]) / 100;   // cm → metros
+        // Factor KAME = d_m² × L_m (fórmula cuadrada, verificada con maestro)
+        const factor  = diam_m * diam_m * largo;
+        const key     = especie + '|' + largo;
         if (!grupos[key]) grupos[key] = 0;
         grupos[key] += qty * factor;
       });
@@ -1945,6 +1962,7 @@ const App = {
     modal.addEventListener('click', function(e){ if (e.target === modal) modal.remove(); });
     document.body.appendChild(modal);
   },
+
 
 
   // ── TOAST ─────────────────────────────────────────────────────────────
