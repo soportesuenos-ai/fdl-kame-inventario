@@ -324,6 +324,24 @@ const App = {
       homeActions.insertBefore(btnActStock, homeActions.firstChild);
     }
 
+    // ── Botón "Enviar sesión al servidor" para no-admin (reemplaza btnGoSync oculto)
+    let btnEnviarHome = document.getElementById('btnEnviarSesionHome');
+    if (!isAdmin) {
+      if (!btnEnviarHome) {
+        btnEnviarHome = document.createElement('button');
+        btnEnviarHome.id = 'btnEnviarSesionHome';
+        btnEnviarHome.className = 'action-card';
+        btnEnviarHome.innerHTML = '<span style="font-size:24px">📤</span><span>Enviar sesión al servidor</span>';
+        btnEnviarHome.onclick = () => App.submitSesion();
+        const homeActions = document.querySelector('.home-actions');
+        homeActions.appendChild(btnEnviarHome);
+      }
+      btnEnviarHome.style.display = sess ? 'flex' : 'none';
+      if (btnEnviarHome) btnEnviarHome.disabled = !sess || Object.keys(sess.items || {}).length === 0;
+    } else if (btnEnviarHome) {
+      btnEnviarHome.style.display = 'none';
+    }
+
     // ── Botones solo para admin
     const adminContainer = document.getElementById('btnConsolidar').parentNode;
 
