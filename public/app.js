@@ -1581,22 +1581,24 @@ const App = {
   },
 
   async ctCargarStock() {
-    // Usa State.kameStock + State.articles (ya cargados en sesión CANCHA DE TROZOS)
-    // Sin llamada extra a la API — más rápido y funciona offline
     const reR = /CC\s+(\w+)\s+([\d.]+)\s*MTS.*?(\d+)\s*CM/i;
     const reM = /METRO\s+RUMA/i;
 
-    const buildGrupos = function(kameStock, articles) {
-      const artMap = {};
-      (articles || []).forEach(function(a) { if (a.sku) artMap[a.sku] = a; });
+    // Intento 1: API directo (campos reales: articulo=desc, saldo=qty, SKU=sku)
+    try {
+      const bodega = encodeURIComponent('CANCHA DE TROZOS');
+      const resp   = await fetch(API_BASE + '/inventario/stock/bodega/' + bodega, { headers: apiHeaders() });
+      if (!resp.ok) throw new Error(resp.status);
+      const data  = await resp.json();
+      const items = (data.items || data || []);
       const grupos = {};
-      Object.keys(kameStock || {}).forEach(function(sku) {
+      items.forEach(function(it) {
+        const sku  = it.SKU || it.sku || '';
         if (!sku.startsWith('TRO')) return;
-        const qty = parseFloat(kameStock[sku] || 0);
+        const qty  = parseFloat(it.saldo || it.saldoPresente || it.StockActual || it.stockActual || 0);
         if (qty <= 0) return;
-        const art  = artMap[sku] || {};
-        const desc = art.desc || '';
-        if (!desc) return;
+        // descripción está en campo 'articulo'
+        const desc = it.articulo || it.Articulo || it.Descripcion || it.descripcion || '';
         if (reM.test(desc)) {
           const mL = desc.match(/([\d.]+)\s*MTS/i);
           if (mL) { const k = 'METRO_RUMA|'+parseFloat(mL[1]); grupos[k]=(grupos[k]||0)+qty*1.5; }
@@ -1609,18 +1611,12 @@ const App = {
         const key = m[1].toUpperCase() + '|' + parseFloat(m[2]);
         grupos[key] = (grupos[key] || 0) + qty * factor;
       });
-      return grupos;
-    };
-
-    // Intento 1: State en memoria
-    if (Object.keys(State.kameStock || {}).length > 0 && (State.articles || []).length > 0) {
-      const grupos = buildGrupos(State.kameStock, State.articles);
       if (Object.keys(grupos).length > 0) {
         this._ct.kame_grupos = grupos;
         await DB.save('articles', { sku: '__ct_grupos__', grupos: grupos, ts: Date.now() });
         return grupos;
       }
-    }
+    } catch(e) {}
 
     // Intento 2: caché IDB
     try {
