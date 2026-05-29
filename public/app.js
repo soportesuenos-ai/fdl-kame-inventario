@@ -1279,6 +1279,7 @@ const App = {
 
     const fecha = new Date().toISOString().slice(0, 10);
     let ok = 0, errors = 0;
+    const folioMap = {};  // sku → folio
 
     for (const item of diffs) {
       const kame  = App._consoKameStock[item.sku] ?? 0;
@@ -1310,7 +1311,7 @@ const App = {
         });
         if (r.ok) {
           const rj = await r.json().catch(() => ({}));
-          itemDet._folio = rj?.Folio ?? rj?.folio ?? '';
+          folioMap[item.sku] = String(rj?.Folio ?? rj?.folio ?? '');
           ok++;
         } else errors++;
       } catch(e) { errors++; }
@@ -1335,7 +1336,7 @@ const App = {
         kame:  App._consoKameStock[i.sku] ?? null,
         diff:  i.qty_contada - (App._consoKameStock[i.sku] ?? 0),
         tipo:  (i.qty_contada - (App._consoKameStock[i.sku] ?? 0)) > 0 ? 'ENTRADA' : 'SALIDA',
-        folio: i._folio ?? '',
+        folio: folioMap[i.sku] ?? '',
       })),
     });
 
