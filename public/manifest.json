@@ -4,8 +4,8 @@
   "description": "Toma de inventario Flor del Lago",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0f1923",
-  "theme_color": "#e8a020",
+  "background_color": "#f4f7f0",
+  "theme_color": "#28461E",
   "orientation": "portrait",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
