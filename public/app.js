@@ -862,7 +862,7 @@ const App = {
 
   adjustQty(delta) {
     const input = document.getElementById('cantidadInput');
-    const val   = parseFloat(input.value) || 0;
+    const val   = parseFloat(input.value.replace(',', '.')) || 0;
     input.value = Math.max(0, val + delta);
     App.updateModalDiff();
   },
@@ -871,7 +871,7 @@ const App = {
     const sku   = App._modalSku;
     const input = document.getElementById('cantidadInput');
     const div   = document.getElementById('modalDiff');
-    const val   = parseFloat(input.value);
+    const val   = parseFloat(input.value.replace(',', '.'));
     const kame  = State.kameStock[sku];
 
     if (isNaN(val) || kame === undefined) { div.textContent = ''; return; }
@@ -890,7 +890,7 @@ const App = {
 
   async saveCount() {
     const sku = App._modalSku;
-    const val = parseFloat(document.getElementById('cantidadInput').value);
+    const val = parseFloat(document.getElementById('cantidadInput').value.replace(',', '.'));
     if (isNaN(val) || val < 0) { App.toast('Ingresa una cantidad válida'); return; }
 
     if (!State.currentSession.items) State.currentSession.items = {};
@@ -1813,7 +1813,7 @@ const App = {
     var render = function() {
       var avg   = alturas.length ? (alturas.reduce(function(a,b){return a+b;},0)/alturas.length).toFixed(3) : '&mdash;';
       var lgVal = document.getElementById('ctLargoRuma') ? document.getElementById('ctLargoRuma').value : '';
-      var lgRuma = parseFloat(lgVal) || 0;
+      var lgRuma = parseFloat(lgVal.replace(',', '.')) || 0;
       var mr  = (alturas.length && lgRuma) ? ((parseFloat(avg)*lgRuma*self._ct.largo)/2.44).toFixed(3) : '&mdash;';
       var m3  = (mr !== '&mdash;') ? (parseFloat(mr)*1.56).toFixed(3) : '&mdash;';
 
@@ -1884,7 +1884,7 @@ const App = {
 
   _ctAddAltura() {
     var inp = document.getElementById('ctAltInput');
-    var val = parseFloat(inp ? inp.value : '');
+    var val = parseFloat(inp ? inp.value.replace(',', '.') : '');
     if (isNaN(val) || val <= 0) { App.toast('Altura inválida'); return; }
     if (App._ctModalAlturas.length >= 30) { App.toast('Máximo 30 alturas'); return; }
     App._ctModalAlturas.push(val);
