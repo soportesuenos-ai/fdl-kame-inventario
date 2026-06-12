@@ -398,6 +398,18 @@ const App = {
       homeActions.insertBefore(btnActStock, homeActions.firstChild);
     }
 
+    // ── Botón "Tomas enviadas" (todos los usuarios): ver/editar/borrar
+    //    las tomas que cualquier usuario subió al servidor
+    let btnTomas = document.getElementById('btnTomasServidor');
+    if (!btnTomas) {
+      btnTomas = document.createElement('button');
+      btnTomas.id = 'btnTomasServidor';
+      btnTomas.className = 'action-card';
+      btnTomas.innerHTML = '<span style="font-size:24px">📨</span><span>Tomas enviadas</span>';
+      btnTomas.onclick = () => App.showTomasServidor();
+      document.querySelector('.home-actions').appendChild(btnTomas);
+    }
+
     // ── Botón "Enviar sesión al servidor" para no-admin (reemplaza btnGoSync oculto)
     let btnEnviarHome = document.getElementById('btnEnviarSesionHome');
     if (!isAdmin) {
@@ -602,6 +614,12 @@ const App = {
     if (!bodega) { App.toast('Selecciona una bodega'); return; }
     if (!fecha)  { App.toast('Selecciona una fecha');  return; }
     if (!resp)   { App.toast('Ingresa el responsable'); return; }
+
+    // Sesión nueva arranca limpia: sin filtros ni búsqueda de la sesión anterior
+    State.searchQuery = '';
+    const searchEl = document.getElementById('searchInput');
+    if (searchEl) searchEl.value = '';
+    App.clearFilters();
 
     State.currentSession = {
       id: 'current',
@@ -1152,7 +1170,9 @@ const App = {
     const nItems = Object.keys(sess.items || {}).length;
     if (nItems === 0) { App.toast('La sesión no tiene conteos'); return; }
 
-    const sesionId = [
+    // Si la sesión vino de "editar toma enviada", reusar el id original para
+    // que el servidor la reemplace en vez de duplicarla
+    const sesionId = sess._serverId || [
       State.currentUser?.user || 'usr',
       sess.bodega,
       sess.fecha,
@@ -1169,7 +1189,7 @@ const App = {
     try {
       const body = {
         sesion_id: sesionId,
-        usuario:   State.currentUser?.nombre || State.currentUser?.user || 'sistema',
+        usuario:   sess._serverUsuario || State.currentUser?.nombre || State.currentUser?.user || 'sistema',
         bodega:    sess.bodega,
         calle:     sess.calle || null,
         fecha:     sess.fecha,
@@ -1198,6 +1218,121 @@ const App = {
       App.toast('Sin conexión al enviar sesión');
       if (btn) { btn.disabled = false; btn.textContent = '📤 Enviar sesión al servidor'; }
     }
+  },
+
+  // ── TOMAS ENVIADAS AL SERVIDOR (todos los usuarios) ──────────────────
+  _tomasServidor: [],   // caché de la última carga: [{bodega, sesion}]
+
+  _bodegasConocidas() {
+    const opts = Array.from(document.querySelectorAll('#consoBodega option'))
+      .map(o => o.value).filter(Boolean);
+    return opts.length ? opts
+      : ['PATIO VERDE', 'CANCHA DE TROZOS', 'SALA DE VENTAS VILLARRICA', 'PATIO PELLET'];
+  },
+
+  async showTomasServidor() {
+    if (!State.isOnline) { App.toast('Sin conexión — las tomas están en el servidor'); return; }
+    App.toast('Cargando tomas enviadas...');
+    const bodegas = App._bodegasConocidas();
+    const results = await Promise.all(bodegas.map(async b => {
+      try {
+        const r = await fetch(`${API_BASE}/inventario/sesiones?bodega=${encodeURIComponent(b)}`, { headers: apiHeaders() });
+        if (!r.ok) return [];
+        const d = await r.json();
+        return (d.sesiones || []).map(s => ({ bodega: b, sesion: s }));
+      } catch (e) { return []; }
+    }));
+    App._tomasServidor = results.flat().sort((a, b) => (b.sesion.ts_recibida || 0) - (a.sesion.ts_recibida || 0));
+    App._renderTomasModal();
+  },
+
+  _renderTomasModal() {
+    let modal = document.getElementById('tomasModal');
+    if (modal) modal.remove();
+    modal = document.createElement('div');
+    modal.id = 'tomasModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9998;display:flex;align-items:flex-end;';
+    document.body.appendChild(modal);
+
+    const rows = App._tomasServidor.length === 0
+      ? '<p style="padding:20px;color:#888;text-align:center">No hay tomas enviadas en el servidor</p>'
+      : App._tomasServidor.map((t, idx) => {
+          const s = t.sesion;
+          const nItems  = Object.keys(s.items || {}).length;
+          const recib   = s.ts_recibida ? new Date(s.ts_recibida * 1000).toLocaleString('es-CL') : '';
+          return '<div style="border-bottom:1px solid #eee;padding:12px 16px">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">' +
+            '<span style="font-weight:700">' + esc(s.usuario || '?') + '</span>' +
+            '<span style="font-size:12px;color:#888">' + esc(recib) + '</span></div>' +
+            '<div style="font-size:13px">' + esc(t.bodega) + ' — ' + esc(s.fecha || '') +
+            (s.calle ? ' — calle ' + esc(s.calle) : '') + ' — <b>' + nItems + '</b> ítems</div>' +
+            '<div style="font-size:11px;color:#aaa;font-family:monospace;margin:2px 0 8px">' + esc(s.sesion_id || '') + '</div>' +
+            '<div style="display:flex;gap:8px">' +
+            '<button onclick="App._editarTomaServidor(' + idx + ')" style="flex:1;background:none;border:1px solid #2980b9;color:#2980b9;border-radius:8px;padding:8px;font-size:13px;cursor:pointer">✏️ Editar y reenviar</button>' +
+            '<button onclick="App._borrarTomaServidor(' + idx + ')" style="flex:1;background:none;border:1px solid #e74c3c;color:#e74c3c;border-radius:8px;padding:8px;font-size:13px;cursor:pointer">🗑 Borrar</button>' +
+            '</div></div>';
+        }).join('');
+
+    modal.innerHTML =
+      '<div style="background:#fff;width:100%;max-height:85vh;overflow-y:auto;border-radius:16px 16px 0 0">' +
+      '<div style="padding:16px;font-weight:700;font-size:18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;position:sticky;top:0;background:#fff">' +
+      '<span>📨 Tomas enviadas (' + App._tomasServidor.length + ')</span>' +
+      '<button onclick="document.getElementById(\'tomasModal\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#666">&times;</button>' +
+      '</div>' + rows + '</div>';
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  },
+
+  async _editarTomaServidor(idx) {
+    const t = App._tomasServidor[idx];
+    if (!t) return;
+    const s = t.sesion;
+    if (State.currentSession) {
+      if (!confirm('Tenés una sesión activa. ¿Descartarla y cargar la toma de ' + (s.usuario || '?') + ' para editarla?')) return;
+    } else {
+      if (!confirm('¿Cargar la toma de ' + (s.usuario || '?') + ' (' + t.bodega + ') para editarla? Al terminar, enviala de nuevo al servidor y reemplazará la original.')) return;
+    }
+    const items = {};
+    for (const [sku, d] of Object.entries(s.items || {})) {
+      items[sku] = { qty: d.qty ?? 0, obs: d.obs || '', ts: Date.now() };
+    }
+    State.currentSession = {
+      id: 'current',
+      bodega: t.bodega,
+      fecha:  s.fecha || new Date().toISOString().slice(0, 10),
+      resp:   s.usuario || State.currentUser?.nombre || '',
+      calle:  s.calle || '',
+      obs:    '',
+      items,
+      extraSkus: Object.keys(items),   // que todos los SKUs de la toma sean visibles
+      createdAt: Date.now(),
+      _serverId:      s.sesion_id,     // reenviar con el mismo id → reemplaza
+      _serverUsuario: s.usuario || '',
+    };
+    await DB.save('sessions', State.currentSession);
+    document.getElementById('tomasModal')?.remove();
+    App.goTo('count');
+    if (State.isOnline) await App.loadKameStock();
+    App.toast('Toma cargada — editá y usá "Enviar sesión al servidor" para reemplazarla');
+  },
+
+  async _borrarTomaServidor(idx) {
+    const t = App._tomasServidor[idx];
+    if (!t) return;
+    const s = t.sesion;
+    if (!confirm('¿Borrar del servidor la toma de ' + (s.usuario || '?') + ' (' + t.bodega + ', ' + (s.fecha || '') + ')?')) return;
+    try {
+      const r = await fetch(
+        `${API_BASE}/inventario/sesiones?bodega=${encodeURIComponent(t.bodega)}&sesion_id=${encodeURIComponent(s.sesion_id)}`,
+        { method: 'DELETE', headers: apiHeaders() }
+      );
+      if (r.ok) {
+        App._tomasServidor.splice(idx, 1);
+        App._renderTomasModal();
+        App.toast('Toma borrada del servidor ✓');
+      } else {
+        App.toast('Error al borrar (' + r.status + ')');
+      }
+    } catch (e) { App.toast('Sin conexión'); }
   },
 
   // ── CONSOLIDADO (ADMIN) ───────────────────────────────────────────────
@@ -1942,6 +2077,7 @@ const App = {
         '</div>' +
 
         '<div id="ctCalcPreview" style="background:#f0f7ff;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px">' +
+        '<div style="font-size:16px;margin-bottom:4px">Medidas ingresadas: <b>' + alturas.length + '</b></div>' +
         '<div>Altura promedio: <b>' + avg + ' m</b></div>' +
         '<div>MR calculado: <b>' + mr + '</b></div>' +
         '<div>m³ sólido: <b>' + m3 + '</b></div>' +
@@ -1976,6 +2112,7 @@ const App = {
     var mr  = (alturas.length && lgRuma && App._ct.largo) ? ((avg*lgRuma*App._ct.largo)/2.44) : 0;
     var m3  = mr * 1.56;
     calcEl.innerHTML =
+      '<div style="font-size:16px;margin-bottom:4px">Medidas ingresadas: <b>' + alturas.length + '</b></div>' +
       '<div>Altura promedio: <b>' + (avg ? avg.toFixed(3) : '&mdash;') + ' m</b></div>' +
       '<div>MR calculado: <b>' + (mr ? mr.toFixed(3) : '&mdash;') + '</b></div>' +
       '<div>m³ sólido: <b>' + (m3 ? m3.toFixed(3) : '&mdash;') + '</b></div>';

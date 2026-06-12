@@ -178,6 +178,33 @@ eq('separador ; y decimal coma', csv.includes('"TRO01";"TROZO ""PINO"" 3.2M";10,
 eq('encabezado presente', csv.includes('SKU;Descripción;Contado;Stock KAME;Diferencia;Calles;Observaciones'), true);
 eq('nombre de archivo', App._consoFileName().startsWith('consolidado_CANCHA_DE_TROZOS_'), true);
 
+// ════ 10. Filtros — impregnado / lixiviado y limpieza ════
+console.log('\n10. filtros');
+const arts = [
+  { sku: 'A', desc: 'PINO IMPREGNADO 2X2X3.20', familia: '' },
+  { sku: 'B', desc: 'PINO LIXIVIADO 2X2X3.20',  familia: '' },
+  { sku: 'C', desc: 'PINO SECO 2X2X3.20',       familia: '' },
+];
+State.searchQuery = '';
+State.filters = { familia: null, tipo: null, calidad: null, condicion: 'IMPREGNADO', proceso: null, stock: null };
+eq('filtro IMPREGNADO', App._applyFilters([...arts]).map(a => a.sku).join(''), 'A');
+State.filters.condicion = 'LIXIVIADO';
+eq('filtro LIXIVIADO', App._applyFilters([...arts]).map(a => a.sku).join(''), 'B');
+App.clearFilters();
+eq('clearFilters resetea condicion', State.filters.condicion, null);
+eq('clearFilters resetea todos', Object.values(State.filters).every(v => v === null), true);
+
+// ════ 11. Reenvío de toma editada conserva sesion_id ════
+console.log('\n11. sesion_id al reenviar');
+{
+  const sess = { _serverId: 'bodega1_PATIO_VERDE_2026-06-10', bodega: 'PATIO VERDE', fecha: '2026-06-12' };
+  const sesionId = sess._serverId || ['usr', sess.bodega, sess.fecha].join('_').replace(/\s+/g, '_');
+  eq('usa el id original del servidor', sesionId, 'bodega1_PATIO_VERDE_2026-06-10');
+  const nueva = { bodega: 'PATIO VERDE', fecha: '2026-06-12' };
+  const idNuevo = nueva._serverId || ['usr', nueva.bodega, nueva.fecha].join('_').replace(/\s+/g, '_');
+  eq('sesión nueva genera id propio', idNuevo, 'usr_PATIO_VERDE_2026-06-12');
+}
+
 // ════ Resultado ════
 console.log('\n' + pass + ' pasaron, ' + fail + ' fallaron');
 process.exit(fail ? 1 : 0);
