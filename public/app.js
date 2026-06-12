@@ -158,9 +158,18 @@ const App = {
     window.addEventListener('offline', () => App.setOnline(false));
     App.setOnline(navigator.onLine);
 
-    // Service Worker
+    // Service Worker: registrar, buscar actualización al abrir y recargar
+    // una sola vez cuando se activa una versión nueva
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
+      navigator.serviceWorker.register('/sw.js')
+        .then(reg => reg.update().catch(() => {}))
+        .catch(() => {});
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloaded) return;
+        reloaded = true;
+        location.reload();
+      });
     }
 
     // Splash → login/home
