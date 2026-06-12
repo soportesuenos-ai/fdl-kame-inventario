@@ -13,6 +13,11 @@ function apiHeaders() {
 }
 
 
+// Helper: redondea a 3 decimales para mostrar (evita ruido de float tipo 4.300000000000001)
+function fmtN(n) {
+  return Math.round(n * 1000) / 1000;
+}
+
 // Helper: escape HTML para evitar XSS
 function esc(str) {
   return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -476,8 +481,8 @@ const App = {
     const renderModal = () => {
       const rows = Object.entries(USERS).map(([u, d]) => `
         <tr style="border-bottom:1px solid #f0f0f0">
-          <td style="padding:8px 6px;font-family:monospace;font-weight:600">${u}</td>
-          <td style="padding:8px 6px">${d.nombre}</td>
+          <td style="padding:8px 6px;font-family:monospace;font-weight:600">${esc(u)}</td>
+          <td style="padding:8px 6px">${esc(d.nombre)}</td>
           <td style="padding:8px 6px"><span style="background:${d.rol==='admin'?'#1a3a5c':d.rol==='jefe'?'#e67e22':'#27ae60'};color:#fff;padding:2px 8px;border-radius:10px;font-size:11px">${d.rol}</span></td>
           <td style="padding:8px 6px;font-family:monospace">${'●'.repeat(d.pin.length)}</td>
           <td style="padding:8px 6px;text-align:center">
@@ -875,7 +880,7 @@ const App = {
     const kame  = State.kameStock[sku];
 
     if (isNaN(val) || kame === undefined) { div.textContent = ''; return; }
-    const diff = val - kame;
+    const diff = fmtN(val - kame);
     if (diff === 0) {
       div.className = 'modal-diff zero';
       div.textContent = '✓ Coincide con KAME';
@@ -916,7 +921,7 @@ const App = {
     const rows = items.map(([sku, item]) => {
       const art   = State.articles.find(a => a.sku === sku);
       const kame  = State.kameStock[sku];
-      const delta = kame !== undefined ? item.qty - kame : null;
+      const delta = kame !== undefined ? fmtN(item.qty - kame) : null;
       if (delta === 0) ok++; else if (delta !== null) diff++;
       return { sku, item, art, kame, delta };
     });
@@ -1273,7 +1278,7 @@ const App = {
 
     let items = App._consoData.map(i => {
       const kame  = i.sku in App._consoKameStock ? App._consoKameStock[i.sku] : null;
-      const delta = kame !== null ? i.qty_contada - kame : null;
+      const delta = kame !== null ? fmtN(i.qty_contada - kame) : null;
       const art   = State.articles.find(a => a.sku === i.sku);
       return { ...i, kame, delta, desc: art?.desc || i.sku };
     });
@@ -1319,6 +1324,93 @@ const App = {
     document.querySelectorAll('#consoFilterBar .chip').forEach(c => c.classList.remove('active'));
     btn.classList.add('active');
     App.renderConsolidado();
+  },
+
+  // ── EXPORTAR CONSOLIDADO (Excel / correo) ─────────────────────────────
+  _consoRows() {
+    return App._consoData.map(i => {
+      const kame  = i.sku in App._consoKameStock ? App._consoKameStock[i.sku] : null;
+      const delta = kame !== null ? fmtN(i.qty_contada - kame) : null;
+      const art   = State.articles.find(a => a.sku === i.sku);
+      return {
+        sku:    i.sku,
+        desc:   art?.desc || '',
+        qty:    i.qty_contada,
+        kame:   kame,
+        delta:  delta,
+        calles: (i.calles || []).join(', '),
+        obs:    i.obs || '',
+      };
+    });
+  },
+
+  _consoCsv() {
+    const bodega = document.getElementById('consoBodega').value || '';
+    const fecha  = new Date().toLocaleString('es-CL');
+    // Excel es-CL: separador ';' y decimales con coma
+    const num = v => v === null || v === undefined ? '' : String(v).replace('.', ',');
+    const txt = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+    const lines = [
+      ['Consolidado de inventario', txt(bodega)].join(';'),
+      ['Generado', txt(fecha), 'Stock KAME al', txt(App._consoStockTs || '')].join(';'),
+      '',
+      ['SKU', 'Descripción', 'Contado', 'Stock KAME', 'Diferencia', 'Calles', 'Observaciones'].join(';'),
+    ];
+    for (const r of App._consoRows()) {
+      lines.push([txt(r.sku), txt(r.desc), num(r.qty), num(r.kame), num(r.delta), txt(r.calles), txt(r.obs)].join(';'));
+    }
+    return '﻿' + lines.join('\r\n');  // BOM para que Excel lea UTF-8
+  },
+
+  _consoFileName() {
+    const bodega = (document.getElementById('consoBodega').value || 'bodega').replace(/\s+/g, '_');
+    return `consolidado_${bodega}_${new Date().toISOString().slice(0, 10)}.csv`;
+  },
+
+  exportConsolidado() {
+    if (!App._consoData.length) { App.toast('Primero cargá las sesiones'); return; }
+    const blob = new Blob([App._consoCsv()], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = App._consoFileName();
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    App.toast('✓ Excel descargado — abrilo o adjuntalo a un correo');
+  },
+
+  async shareConsolidado() {
+    if (!App._consoData.length) { App.toast('Primero cargá las sesiones'); return; }
+    const bodega = document.getElementById('consoBodega').value || '';
+    const file = new File([App._consoCsv()], App._consoFileName(), { type: 'text/csv' });
+    // Web Share API con archivo: en celular abre Gmail/Outlook/WhatsApp con el CSV adjunto
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: `Consolidado ${bodega}`,
+          text:  `Consolidado de inventario ${bodega} — ${new Date().toLocaleDateString('es-CL')}`,
+        });
+        return;
+      } catch (e) {
+        if (e.name === 'AbortError') return;  // usuario canceló
+      }
+    }
+    // Fallback (escritorio): descargar el CSV y abrir un correo con el resumen
+    App.exportConsolidado();
+    const rows  = App._consoRows();
+    const diffs = rows.filter(r => r.delta !== 0 && r.delta !== null);
+    const resumen = diffs.slice(0, 40)
+      .map(r => `${r.sku}  contado ${r.qty} / KAME ${r.kame ?? '-'} / dif ${r.delta > 0 ? '+' : ''}${r.delta}`)
+      .join('\n');
+    const body =
+      `Consolidado de inventario ${bodega} — ${new Date().toLocaleDateString('es-CL')}\n` +
+      `SKUs contados: ${rows.length} | Con diferencia: ${diffs.length}\n\n` +
+      `Diferencias:\n${resumen}` +
+      (diffs.length > 40 ? `\n... y ${diffs.length - 40} más (ver Excel adjunto)` : '') +
+      `\n\n(Adjuntá el archivo CSV recién descargado)`;
+    location.href = 'mailto:?subject=' + encodeURIComponent(`Consolidado inventario ${bodega}`) +
+      '&body=' + encodeURIComponent(body);
   },
 
   async generarMovimientos() {
@@ -1638,7 +1730,7 @@ const App = {
       items.forEach(function(it) {
         const sku  = it.SKU || it.sku || '';
         if (!sku.startsWith('TRO')) return;
-        const qty  = parseFloat(it.saldo || it.saldoPresente || it.StockActual || it.stockActual || 0);
+        const qty  = parseFloat(it.saldo ?? it.saldoPresente ?? it.StockActual ?? it.stockActual ?? 0);
         if (qty <= 0) return;
         // descripción está en campo 'articulo'
         const desc = it.articulo || it.Articulo || it.Descripcion || it.descripcion || '';
@@ -2031,4 +2123,4 @@ const App = {
 };
 
 // ── BOOT ──────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => DB.open().then(() => App.init()));
+document.addEventListener('DOMContentLoaded', () => App.init());

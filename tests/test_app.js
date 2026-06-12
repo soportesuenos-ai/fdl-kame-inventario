@@ -147,6 +147,37 @@ eq('escapa HTML', esc('<img src=x onerror=alert(1)>'), '&lt;img src=x onerror=al
 eq('escapa comillas', esc(`a"b'c`), 'a&quot;b&#39;c');
 eq('null → vacío', esc(null), '');
 
+// ════ 8. fmtN — sin ruido de float ════
+console.log('\n8. fmtN y diferencias');
+const fmtN = vm.runInContext('fmtN', sandbox);
+eq('0.1+0.2 redondeado', fmtN(0.30000000000000004), 0.3);
+eq('resta con decimales', fmtN(5 - 0.6), 4.4);
+State.kameStock = { SKU1: 5 };
+App._modalSku = 'SKU1';
+el('cantidadInput').value = '4,9';
+App.updateModalDiff();
+eq('diff 4,9 vs 5 sin ruido de float', el('modalDiff').textContent, '▼ Faltante: -0.1');
+
+// ════ 9. Exportación consolidado (CSV) ════
+console.log('\n9. _consoCsv / _consoRows');
+State.articles = [{ sku: 'TRO01', desc: 'TROZO "PINO" 3.2M', familia: '' }];
+App._consoData = [
+  { sku: 'TRO01', qty_contada: 10.5, calles: ['A1'], obs: 'ok' },
+  { sku: 'XX99',  qty_contada: 3,    calles: [],     obs: '' },
+];
+App._consoKameStock = { TRO01: 8.2 };
+App._consoStockTs   = '10:30';
+el('consoBodega').value = 'CANCHA DE TROZOS';
+const rows = App._consoRows();
+eq('2 filas', rows.length, 2);
+approx('delta TRO01 = 2.3', rows[0].delta, 2.3, 1e-9);
+eq('sin stock KAME → delta null', rows[1].delta, null);
+const csv = App._consoCsv();
+eq('CSV arranca con BOM', csv.charCodeAt(0), 0xFEFF);
+eq('separador ; y decimal coma', csv.includes('"TRO01";"TROZO ""PINO"" 3.2M";10,5;8,2;2,3;"A1";"ok"'), true);
+eq('encabezado presente', csv.includes('SKU;Descripción;Contado;Stock KAME;Diferencia;Calles;Observaciones'), true);
+eq('nombre de archivo', App._consoFileName().startsWith('consolidado_CANCHA_DE_TROZOS_'), true);
+
 // ════ Resultado ════
 console.log('\n' + pass + ' pasaron, ' + fail + ' fallaron');
 process.exit(fail ? 1 : 0);

@@ -386,6 +386,10 @@
   </div>
   <div class="review-list" id="consoList"></div>
   <div class="bottom-action" id="consoActions" style="display:none">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <button class="btn-secondary" onclick="App.exportConsolidado()">📥 Descargar Excel</button>
+      <button class="btn-secondary" onclick="App.shareConsolidado()">✉️ Enviar por correo</button>
+    </div>
     <button class="btn-primary" onclick="App.generarMovimientos()">Generar movimientos en KAME →</button>
     <button class="btn-secondary" style="margin-top:8px" onclick="App.clearSesiones()">🗑 Limpiar sesiones del servidor</button>
   </div>
